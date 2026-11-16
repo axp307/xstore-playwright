@@ -211,14 +211,18 @@ test("stepDelayMs pauses after passed steps only and is counted in step duration
   const app = await shellMock({});
   t.after(app.close);
   const config = { ...(await loadConfiguration("config/localhost-shell.json", app.url)), stepDelayMs: 400 };
-  const { report } = await runScript({
+  const { report, textPath } = await runScript({
     script: "smoke/xstore-is-running.xstore", config, headless, slowMo: 0, reportDir: directory
   });
   assert.equal(report.status, "passed");
   for (const step of report.steps) {
-    if (step.status === "passed") assert.ok(step.durationMs >= 400, `${step.step}: ${step.durationMs} ms`);
-    else assert.ok(step.durationMs < 400, `${step.step} (${step.status}): ${step.durationMs} ms`);
+    assert.equal(step.durationMs, step.executionMs + step.observationDelayMs);
+    if (step.status === "passed") assert.ok(step.observationDelayMs >= 390 && step.executionMs < 400, `${step.step}: ${step.durationMs} ms`);
+    else assert.equal(step.observationDelayMs, 0);
   }
+  assert.equal(report.stepObservationDelayMs, report.steps.reduce((sum, step) => sum + step.observationDelayMs, 0));
+  assert.ok(report.durationMs >= report.stepExecutionMs + report.stepObservationDelayMs - 3);
+  assert.match(await readFile(textPath, "utf8"), /execution \d+ ms \+ observation delay \d+ ms/);
 });
 
 // Starts a local HTTP server imitating the Xstore shell app: two setup forms, a Test Connection dialog,

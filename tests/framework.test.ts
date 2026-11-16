@@ -104,11 +104,12 @@ test("dry-run validates external files and writes planned steps without launchin
   assert.equal(result.report.status, "passed");
   assert.equal(result.report.mode, "dry-run");
   assert.equal(result.report.steps.length, 7);
-  assert.ok(result.report.steps.every(step => step.status === "planned" && step.durationMs === 0));
+  assert.ok(result.report.steps.every(step => step.status === "planned" && step.durationMs === 0 && step.executionMs === 0 && step.observationDelayMs === 0));
+  assert.equal(result.report.stepObservationDelayMs, 0);
   assert.ok(result.report.durationMs >= 0);
   assert.deepEqual(JSON.parse(await readFile(result.jsonPath, "utf8")), result.report);
   const text = await readFile(result.textPath, "utf8");
-  assert.match(text, /Total: \d+ ms/);
+  assert.match(text, /Total elapsed \(wall-clock, incl. browser launch\/close\): \d+ ms/);
   assert.doesNotMatch(text, /REPLACE_ME|DEMO_USER|DEMO_REGISTER/);
 });
 

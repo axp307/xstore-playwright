@@ -211,8 +211,13 @@ Reports are unique `reports/run-*.json` / `.txt` files (ignored by git).
 Step statuses are `passed`, `skipped` (conditional setup), `failed`, `not-run`
 (after failure), or `planned` (dry-run). Dry-run's overall `passed` means preflight
 succeeded, not that the UI was tested. Durations are integer milliseconds using
-a monotonic clock. Total includes browser startup/cleanup; per-step timing
-includes action waits and slow motion, but excludes preflight/report writing.
+a monotonic clock. Each step has `durationMs` (elapsed) = `executionMs` +
+`observationDelayMs`; the text report shows
+`execution X ms + observation delay Y ms`. Execution includes action waits and
+`--slow-mo`; observation delay is the measured `stepDelayMs` pause (0 unless the
+step passed). Run `durationMs` is wall-clock including browser startup/cleanup;
+`stepExecutionMs` and `stepObservationDelayMs` are the sums over steps, so
+`durationMs` is at least their total. Preflight/report writing is excluded.
 
 The first failed step stops execution, preserves its error and timing, marks
 remaining steps `not-run`, and exits nonzero. Browser startup/navigation/cleanup
