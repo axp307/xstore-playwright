@@ -1,6 +1,7 @@
 {
   "baseUrl": "http://localhost:8080",
   "timeoutMs": 15000,
+  "browserState": "fresh",
   "configurationFields": {
     "storeId": "input[name=\"storeId\"]",
     "registerId": "input[name=\"registerId\"]"

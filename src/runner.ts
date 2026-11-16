@@ -88,6 +88,7 @@ export async function runScript(options: RunOptions): Promise<{
       }
     } else {
       browser = await chromium.launch({ headless: options.headless ?? false, slowMo: options.slowMo ?? 250 });
+      // "fresh" = isolated, empty context per run; a future persistent mode would branch here.
       const context = await browser.newContext();
       context.setDefaultTimeout(options.config.timeoutMs);
       context.setDefaultNavigationTimeout(options.config.timeoutMs);

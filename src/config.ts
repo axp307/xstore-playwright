@@ -23,6 +23,8 @@ export const defaultSelectors = {
 export interface Configuration {
   baseUrl: string;
   timeoutMs: number;
+  // Only "fresh" exists today; a persistent-profile mode would be added here later.
+  browserState: "fresh";
   selectors: typeof defaultSelectors;
   configurationFields: Record<string, string>;
   amountFormat: { decimalSeparator: string; groupSeparator: string; currencySymbol: string };
@@ -77,12 +79,16 @@ export function httpUrl(target: string, base?: string): string {
 // Merges selector overrides over defaultSelectors and rejects unknown keys or bad formats.
 export async function loadConfiguration(file?: string, baseUrl?: string): Promise<Configuration> {
   const raw = file ? object(await readJson(file), "Configuration") : {};
-  const allowed = ["baseUrl", "timeoutMs", "selectors", "configurationFields", "amountFormat"];
+  const allowed = ["baseUrl", "timeoutMs", "selectors", "configurationFields", "amountFormat", "browserState"];
   for (const key of Object.keys(raw)) {
     if (!allowed.includes(key)) throw new Error(`Unknown configuration key: ${key}`);
   }
   const base = baseUrl ?? raw.baseUrl ?? "http://localhost:8080";
   if (typeof base !== "string") throw new Error("baseUrl must be a string.");
+  const browserState = raw.browserState === undefined ? "fresh" : raw.browserState;
+  if (browserState !== "fresh") {
+    throw new Error('browserState must be "fresh"; persistent profiles are not supported yet.');
+  }
   const timeout = raw.timeoutMs ?? 15_000;
   if (typeof timeout !== "number" || !Number.isSafeInteger(timeout) || timeout <= 0) {
     throw new Error("timeoutMs must be a positive integer.");
@@ -111,6 +117,7 @@ export async function loadConfiguration(file?: string, baseUrl?: string): Promis
   return {
     baseUrl: httpUrl(base),
     timeoutMs: timeout,
+    browserState,
     selectors: { ...defaultSelectors, ...overrides },
     configurationFields: fields,
     amountFormat: format

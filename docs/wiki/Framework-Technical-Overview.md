@@ -181,6 +181,7 @@ can still expose URLs, paths and UI text, so keep them private.
 | --- | --- | --- |
 | `baseUrl` | HTTP(S) origin; no embedded credentials | `http://localhost:8080` |
 | `timeoutMs` | Positive integer timeout for actions/navigation | `15000` |
+| `browserState` | Browser state per run. Only `"fresh"` (new isolated context) is supported; other values are rejected | `"fresh"` |
 | `selectors` | Overrides for named selectors (see below) | `defaultSelectors` |
 | `configurationFields` | Config-file key -> field selector | `storeId`, `registerId` inputs |
 | `amountFormat` | `decimalSeparator`, `groupSeparator`, `currencySymbol` | `.`, `,`, `$` |
@@ -243,5 +244,6 @@ labels, but selectors have **not** been verified against a running Xstore.
 - Map and verify selectors against a live Xstore test environment.
 - Additional keywords (returns, other tenders, voids, assertions).
 - Screenshots/traces on failure; retries; per-step timing aggregates.
+- Persistent browser profile as a new `browserState` value (extension point: `newContext()` in `src/runner.ts`).
 - Remote-server environment configs and CI usage.
 - Publish this page to the GitHub Wiki once a remote repository exists.

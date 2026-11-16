@@ -119,6 +119,7 @@ buttons fail rather than choosing an arbitrary match.
 {
   "baseUrl": "http://localhost:8080",
   "timeoutMs": 20000,
+  "browserState": "fresh",
   "selectors": {
     "configurationScreen": "#initial-setup",
     "username": "#operator-id",
@@ -134,6 +135,12 @@ buttons fail rather than choosing an arbitrary match.
   }
 }
 ```
+
+`browserState` (environment config only, never a script step) controls browser
+state. The only supported value, and the default when omitted, is `"fresh"`: every
+run uses a new isolated context with no cookies or storage. Any other value,
+including a persistent profile, is rejected until implemented; the extension point
+is the `newContext()` call in `src/runner.ts`.
 
 `configurationScreen` must identify only the first-time setup panel; `username`
 and `startTransaction` identify the alternative ready screens. The conditional

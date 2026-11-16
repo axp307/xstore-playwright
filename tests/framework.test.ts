@@ -63,13 +63,21 @@ test("configuration overrides are validated and base URL override wins", async t
   }));
   const config = await loadConfiguration(file, "https://test.example.com/pos/");
   assert.equal(config.baseUrl, "https://test.example.com/pos/");
+  assert.equal(config.browserState, "fresh");
+  await writeFile(file, JSON.stringify({ browserState: "fresh" }));
+  assert.equal((await loadConfiguration(file)).browserState, "fresh");
+  assert.equal((await loadConfiguration("config/localhost.example.json")).browserState, "fresh");
+  await writeFile(file, JSON.stringify({
+    baseUrl: "http://localhost:8080", selectors: { username: "#user" },
+    configurationFields: { site: "#site" }
+  }));
   assert.equal(config.selectors.username, "#user");
   assert.equal(config.selectors.password, 'input[name="password"]');
   assert.deepEqual(config.configurationFields, { site: "#site" });
   assert.equal(httpUrl("login", config.baseUrl), "https://test.example.com/pos/login");
   assert.equal(httpUrl("/login", config.baseUrl), "https://test.example.com/login");
   for (const input of [
-    { timeoutMs: 0 }, { timeoutMs: "100" }, { baseUrl: "file:///tmp/app" },
+    { timeoutMs: 0 }, { browserState: "persistent" }, { browserState: null }, { timeoutMs: "100" }, { baseUrl: "file:///tmp/app" },
     { selectors: { usernme: "#user" } }, { selectors: { toString: "#x" } },
     { selectors: { username: "" } }, { unknownOption: true },
     { amountFormat: { decimalSeparator: ",", groupSeparator: "," } },
