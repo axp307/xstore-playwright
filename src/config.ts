@@ -44,6 +44,8 @@ export interface Configuration {
   browserState: "fresh";
   // Opt-in: accept the trusted localhost's self-signed HTTPS certificate for this run's context only.
   ignoreHttpsErrors: boolean;
+  // Observation pause (ms) after each successfully executed step; separate from Playwright slowMo.
+  stepDelayMs: number;
   selectors: typeof defaultSelectors;
   configurationFields: Record<string, string>;
   amountFormat: { decimalSeparator: string; groupSeparator: string; currencySymbol: string };
@@ -98,7 +100,7 @@ export function httpUrl(target: string, base?: string): string {
 // Merges selector overrides over defaultSelectors and rejects unknown keys or bad formats.
 export async function loadConfiguration(file?: string, baseUrl?: string): Promise<Configuration> {
   const raw = file ? object(await readJson(file), "Configuration") : {};
-  const allowed = ["baseUrl", "timeoutMs", "selectors", "configurationFields", "amountFormat", "browserState", "ignoreHttpsErrors"];
+  const allowed = ["baseUrl", "timeoutMs", "selectors", "configurationFields", "amountFormat", "browserState", "ignoreHttpsErrors", "stepDelayMs"];
   for (const key of Object.keys(raw)) {
     if (!allowed.includes(key)) throw new Error(`Unknown configuration key: ${key}`);
   }
@@ -107,6 +109,10 @@ export async function loadConfiguration(file?: string, baseUrl?: string): Promis
   const browserState = raw.browserState === undefined ? "fresh" : raw.browserState;
   if (browserState !== "fresh") {
     throw new Error('browserState must be "fresh"; persistent profiles are not supported yet.');
+  }
+  const stepDelayMs = raw.stepDelayMs === undefined ? 0 : raw.stepDelayMs;
+  if (typeof stepDelayMs !== "number" || !Number.isSafeInteger(stepDelayMs) || stepDelayMs < 0) {
+    throw new Error("stepDelayMs must be a non-negative safe integer (milliseconds).");
   }
   const ignoreHttpsErrors = raw.ignoreHttpsErrors ?? false;
   if (typeof ignoreHttpsErrors !== "boolean") throw new Error("ignoreHttpsErrors must be true or false.");
@@ -140,6 +146,7 @@ export async function loadConfiguration(file?: string, baseUrl?: string): Promis
     timeoutMs: timeout,
     browserState,
     ignoreHttpsErrors,
+    stepDelayMs,
     selectors: { ...defaultSelectors, ...overrides },
     configurationFields: fields,
     amountFormat: format

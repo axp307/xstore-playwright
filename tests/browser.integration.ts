@@ -206,6 +206,21 @@ test("HTTP errors fail navigation, produce a report, and stop subsequent steps",
   assert.ok(report.steps.slice(1).every(step => step.status === "not-run"));
 });
 
+test("stepDelayMs pauses after passed steps only and is counted in step durations", async t => {
+  const directory = await workspace(t);
+  const app = await shellMock({});
+  t.after(app.close);
+  const config = { ...(await loadConfiguration("config/localhost-shell.json", app.url)), stepDelayMs: 400 };
+  const { report } = await runScript({
+    script: "smoke/xstore-is-running.xstore", config, headless, slowMo: 0, reportDir: directory
+  });
+  assert.equal(report.status, "passed");
+  for (const step of report.steps) {
+    if (step.status === "passed") assert.ok(step.durationMs >= 400, `${step.step}: ${step.durationMs} ms`);
+    else assert.ok(step.durationMs < 400, `${step.step} (${step.status}): ${step.durationMs} ms`);
+  }
+});
+
 // Starts a local HTTP server imitating the Xstore shell app: two setup forms, a Test Connection dialog,
 // Launch, an optional hardware-error dialog, then a login screen. Markup mirrors the selectors found live.
 async function shellMock(options: { failConnection?: boolean; deviceError?: boolean; noLogin?: boolean }) {

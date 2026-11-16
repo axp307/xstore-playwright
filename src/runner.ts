@@ -117,6 +117,8 @@ export async function runScript(options: RunOptions): Promise<{
         const stepStarted = performance.now();
         try {
           result.status = await executeAction(page, step.action, options.config, data.get(step.line));
+          // Deliberate observation pause; counted in this step's durationMs and the run total.
+          if (result.status === "passed" && options.config.stepDelayMs > 0) await page.waitForTimeout(options.config.stepDelayMs);
         } catch (error) {
           result.status = "failed";
           result.error = redact(error instanceof Error ? error.message : String(error));

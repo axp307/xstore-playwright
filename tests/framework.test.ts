@@ -65,6 +65,8 @@ test("configuration overrides are validated and base URL override wins", async t
   assert.equal(config.baseUrl, "https://test.example.com/pos/");
   assert.equal(config.browserState, "fresh");
   assert.equal(config.ignoreHttpsErrors, false);
+  assert.equal(config.stepDelayMs, 0);
+  assert.equal((await loadConfiguration("config/localhost-shell.json")).stepDelayMs, 1000);
   assert.equal((await loadConfiguration("config/localhost-shell.json")).ignoreHttpsErrors, true);
   await writeFile(file, JSON.stringify({ browserState: "fresh" }));
   assert.equal((await loadConfiguration(file)).browserState, "fresh");
@@ -79,7 +81,7 @@ test("configuration overrides are validated and base URL override wins", async t
   assert.equal(httpUrl("login", config.baseUrl), "https://test.example.com/pos/login");
   assert.equal(httpUrl("/login", config.baseUrl), "https://test.example.com/login");
   for (const input of [
-    { timeoutMs: 0 }, { ignoreHttpsErrors: "yes" }, { browserState: "persistent" }, { browserState: null }, { timeoutMs: "100" }, { baseUrl: "file:///tmp/app" },
+    { timeoutMs: 0 }, { ignoreHttpsErrors: "yes" }, { stepDelayMs: -1 }, { stepDelayMs: 1.5 }, { stepDelayMs: "1000" }, { stepDelayMs: null }, { browserState: "persistent" }, { browserState: null }, { timeoutMs: "100" }, { baseUrl: "file:///tmp/app" },
     { selectors: { usernme: "#user" } }, { selectors: { toString: "#x" } },
     { selectors: { username: "" } }, { unknownOption: true },
     { amountFormat: { decimalSeparator: ",", groupSeparator: "," } },

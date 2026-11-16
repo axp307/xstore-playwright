@@ -3,6 +3,7 @@
   "timeoutMs": 15000,
   "browserState": "fresh",
   "ignoreHttpsErrors": false,
+  "stepDelayMs": 0,
   "configurationFields": {
     "storeId": "input[name=\"storeId\"]",
     "registerId": "input[name=\"registerId\"]"

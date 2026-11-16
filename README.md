@@ -68,6 +68,12 @@ npm start -- --script smoke/xstore-is-running.xstore --config config/localhost-s
   context (default `false`), so the trusted localhost self-signed certificate
   is accepted without automating Chromium's "Advanced" interstitial and without
   changing any browser/system trust. Do not enable it for untrusted hosts.
+- `stepDelayMs` (default `0` = off; non-negative integer ms; `1000` in
+  `config/localhost-shell.json`) pauses after each *passed* step (including the
+  last) so you can watch the screen. It is not applied to dry-run, skipped,
+  failed or not-run steps, is counted in that step's duration and the run total,
+  and is separate from `--slow-mo`, which delays each individual browser
+  operation inside a step. It does not replace readiness waits.
 - `smoke/shell-configuration.json` holds editable `store`, `register`, `host` and
   `port` (all strings; port 1-65535). They are project settings, not secrets.
 - Steps: `Use Xstore shell configuration from "file" if prompted` (shell setup
@@ -153,6 +159,7 @@ buttons fail rather than choosing an arbitrary match.
   "timeoutMs": 20000,
   "browserState": "fresh",
   "ignoreHttpsErrors": false,
+  "stepDelayMs": 0,
   "selectors": {
     "configurationScreen": "#initial-setup",
     "username": "#operator-id",
