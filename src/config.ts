@@ -29,7 +29,7 @@ export const defaultSelectors = {
   shellPort: '[id="serverPort|input"]',
   shellTestConnection: 'role=button[name="Test Connection"s]',
   shellDialog: 'oj-dialog',
-  shellConnectionSuccess: 'oj-dialog:has-text("Connection Test"):has-text("Success")',
+  shellConnectionSuccess: 'oj-dialog:has-text("Connection Test"):has(:text-is("Success"))',
   shellDialogOk: 'oj-dialog >> role=button[name="OK"s]',
   shellLaunch: 'role=button[name="Launch Xstore"s]',
   deviceErrorDialog: 'oj-dialog:has-text("Hardware Error")',

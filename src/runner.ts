@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import type { Browser } from "playwright";
+import type { Browser, Page } from "playwright";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -58,6 +58,19 @@ export function formatRunSummary(report: RunReport): string {
   const overhead = Math.max(0, report.durationMs - report.stepExecutionMs - report.stepObservationDelayMs);
   return `Run ${report.status}; steps: execution ${report.stepExecutionMs} ms + observation delay ${report.stepObservationDelayMs} ms; `
     + `wall-clock total ${report.durationMs} ms (includes ~${overhead} ms browser startup/cleanup and other overhead).`;
+}
+
+// Masks editable and configured input fields before capturing failure evidence.
+// Writes the buffer with owner-only permissions; callers retain best-effort error handling.
+export async function saveFailureScreenshot(page: Page, config: Configuration, file: string): Promise<void> {
+  const s = config.selectors;
+  const mask = [
+    'input, textarea, [contenteditable]',
+    s.username, s.password, ...Object.values(config.configurationFields),
+    s.shellStore, s.shellRegister, s.shellHost, s.shellPort
+  ].map(selector => page.locator(selector));
+  const screenshot = await page.screenshot({ mask });
+  await writeFile(file, screenshot, { mode: 0o600, flag: "wx" });
 }
 
 // Checks a shell-setup input file has exactly store, register, host and a valid port.
@@ -153,7 +166,7 @@ export async function runScript(options: RunOptions): Promise<{
           report.status = "failed";
           // Best-effort evidence of what the page showed; never masks the original failure.
           const shot = resolve(directory, `${id}-line-${step.line}.png`);
-          result.screenshot = await page.screenshot({ path: shot }).then(() => shot, () => undefined);
+          result.screenshot = await saveFailureScreenshot(page, options.config, shot).then(() => shot, () => undefined);
         } finally {
           // Without a pause, execution is the whole step; otherwise it was captured before the pause.
           if (result.observationDelayMs === 0) result.executionMs = Math.round(performance.now() - stepStarted);

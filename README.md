@@ -78,12 +78,12 @@ npm start -- --script smoke/xstore-is-running.xstore --config config/localhost-s
   `port` (all strings; port 1-65535). They are project settings, not secrets.
 - Steps: `Use Xstore shell configuration from "file" if prompted` (shell setup
   screen only: Location Details -> Store/Register -> Save; Connection Details ->
-  Hostname/Port -> Test Connection; requires a *Success* dialog, else the step
+  Hostname/Port -> Test Connection; requires an exact *Success* label in the dialog, else the step
   fails before Launch; OK -> Save -> Launch Xstore; `skipped` if the setup screen
   is absent), `Dismiss the device error prompt if shown` (presses OK on a
   "Hardware Error" dialog, e.g. barcode scanner driver, when present; otherwise
   `skipped`), and `Wait for the Xstore login screen` (fails unless the login
-  heading and input are visible and no hardware dialog remains).
+  heading and input are visible and the hardware dialog is hidden or absent).
 - An unreachable service, failed connection test, unknown screen, or missing
   login screen is a **failed** run with a saved report (and a screenshot of the
   page for the failing step, `*-line-N.png`), never a skipped success.
@@ -141,9 +141,13 @@ configuration values. Put real files in ignored `secrets/` or use
 real credentials. Inspect git status before committing.
 
 The runner redacts loaded input values from persisted error messages and step
-text, does not log fill values, and writes reports with owner-only permissions
-on POSIX. Reports can still reveal URLs, paths, UI labels and other application
-data; keep them private. Do not put credentials directly in scripts or selectors.
+text and does not log fill values. Failure screenshots mask editable fields,
+configured credential/configuration fields, and shell setup inputs. Reports and
+screenshots are written with owner-only permissions (`0600`) on POSIX.
+Screenshots are best-effort; capture/write failures never replace the original
+step error. Reports and screenshots can still reveal URLs, paths, UI labels,
+or sensitive data displayed outside masked fields; keep them private.
+Do not put credentials directly in scripts or selectors.
 
 ## Adapting to Xstore
 

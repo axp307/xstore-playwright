@@ -170,8 +170,11 @@ First-time configuration (non-empty strings keyed by `configurationFields`):
 
 Keep real values out of git: use the ignored `secrets/`, `*.local.txt`, or
 `config/*.local.json`. Committed `examples/*.example.json` hold demo values
-only. Loaded values are redacted from persisted step text and errors; reports
-can still expose URLs, paths and UI text, so keep them private.
+only. Loaded values are redacted from persisted step text and errors. Failure
+screenshots mask editable fields, configured credential/configuration fields,
+and shell inputs, and are saved with POSIX mode `0600`. Screenshot capture/write
+is best-effort and does not replace the original failure. Reports and screenshots
+can still expose URLs, paths, UI text, and data outside masked fields; keep them private.
 
 ## 6. Environment configuration
 
@@ -252,11 +255,12 @@ npm start -- --script smoke/xstore-is-running.xstore --config config/localhost-s
 ```
 
 Keywords added: `Use Xstore shell configuration from "file" if prompted`
-(`shellConfigure`: Location Details, Connection Details, requires a Success
-Test Connection dialog, saves, Launch Xstore; skipped if the setup screen is
+(`shellConfigure`: Location Details, Connection Details, requires an exact
+Success label in the Test Connection dialog, saves, Launch Xstore; skipped if the setup screen is
 absent), `Dismiss the device error prompt if shown` (`dismissDeviceError`, OK on
 a "Hardware Error" dialog if present) and `Wait for the Xstore login screen`
-(`expectLogin`). The shell file needs exactly `store`, `register`, `host`,
+(`expectLogin`, requires the login form ready and hardware dialog hidden or
+absent, including dialogs retained in the DOM). The shell file needs exactly `store`, `register`, `host`,
 `port` (strings, port 1-65535; not redacted since they are not secrets).
 
 Config: `ignoreHttpsErrors` (default `false`) sets Playwright's

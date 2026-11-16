@@ -2,9 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
+import { resolve } from "node:path";
+import { chromium } from "playwright";
 import { loadConfiguration } from "../src/config.js";
-import { runScript } from "../src/runner.js";
+import { runScript, saveFailureScreenshot } from "../src/runner.js";
 import { workspace } from "./helpers.js";
 
 const headless = process.env.HEADED !== "1";
@@ -227,7 +229,7 @@ test("stepDelayMs pauses after passed steps only and is counted in step duration
 
 // Starts a local HTTP server imitating the Xstore shell app: two setup forms, a Test Connection dialog,
 // Launch, an optional hardware-error dialog, then a login screen. Markup mirrors the selectors found live.
-async function shellMock(options: { failConnection?: boolean; deviceError?: boolean; noLogin?: boolean }) {
+async function shellMock(options: { failConnection?: string; deviceError?: boolean; retainDialog?: boolean; noLogin?: boolean }) {
   const server = createServer((_request, response) => {
     response.writeHead(200, { "Content-Type": "text/html" });
     response.end(`<!doctype html><html><body><div id="root"></div><script>
@@ -243,7 +245,7 @@ async function shellMock(options: { failConnection?: boolean; deviceError?: bool
       function dialog(html, ok) {
         const d = document.createElement("oj-dialog");
         d.innerHTML = html;
-        d.append(button("OK", () => { d.remove(); ok && ok(); }));
+        d.append(button("OK", () => { ${options.retainDialog ? "d.hidden = true" : "d.remove()"}; ok && ok(); }));
         document.body.append(d);
       }
       function main() {
@@ -262,7 +264,7 @@ async function shellMock(options: { failConnection?: boolean; deviceError?: bool
         root.innerHTML = "";
         root.append(field("serverHost|input"), field("serverPort|input"), button("Back", main),
           button("Test Connection", () => dialog(${JSON.stringify(options.failConnection
-            ? "<h2>Connection Test</h2><p>Failed to connect</p>" : "<h2>Connection Test</h2><p>Success</p>")})),
+            ? `<h2>Connection Test</h2><p>${options.failConnection}</p>` : "<h2>Connection Test</h2><p>Success</p>")})),
           button("Save", () => { saved.host = document.getElementById("serverHost|input").value;
             saved.port = document.getElementById("serverPort|input").value; main(); }));
       }
@@ -289,10 +291,11 @@ async function shellMock(options: { failConnection?: boolean; deviceError?: bool
 
 // Runs the smoke script against the shell mock with and without a hardware-error dialog.
 // Both must end at the login screen, with the dialog step reported as passed or skipped respectively.
-for (const deviceError of [true, false]) {
-  test(`smoke script reaches the login screen ${deviceError ? "after dismissing" : "without"} a device error`, async t => {
+for (const options of [{ deviceError: false }, { deviceError: true }, { deviceError: true, retainDialog: true }]) {
+  const { deviceError, retainDialog } = options;
+  test(`smoke script reaches login with device error ${deviceError}, retained dialog ${Boolean(retainDialog)}`, async t => {
     const directory = await workspace(t);
-    const app = await shellMock({ deviceError });
+    const app = await shellMock(options);
     t.after(app.close);
     const config = await loadConfiguration(undefined, app.url);
     config.timeoutMs = 3000;
@@ -308,21 +311,44 @@ for (const deviceError of [true, false]) {
 
 // A failed Test Connection dialog must fail the setup step and never press Launch.
 // Later steps stay not-run, and the report keeps the dialog text and a failure screenshot.
-test("a failed connection test fails the run before Launch", async t => {
-  const directory = await workspace(t);
-  const app = await shellMock({ failConnection: true });
-  t.after(app.close);
-  const config = await loadConfiguration(undefined, app.url);
-  config.timeoutMs = 3000;
-  const { report, textPath } = await runScript({
-    script: "smoke/xstore-is-running.xstore", config, headless, slowMo, reportDir: directory
+for (const failConnection of ["Failed to connect", "Unsuccessful", "Not Success"]) {
+  test(`connection result "${failConnection}" fails the run before Launch`, async t => {
+    const directory = await workspace(t);
+    const app = await shellMock({ failConnection });
+    t.after(app.close);
+    const config = await loadConfiguration(undefined, app.url);
+    config.timeoutMs = 3000;
+    const { report, textPath } = await runScript({
+      script: "smoke/xstore-is-running.xstore", config, headless, slowMo, reportDir: directory
+    });
+    assert.equal(report.status, "failed");
+    assert.equal(report.steps[1]!.status, "failed");
+    assert.ok(report.steps[1]!.error!.includes(`Test Connection did not succeed: Connection Test ${failConnection}`));
+    assert.ok(report.steps.slice(2).every(step => step.status === "not-run"));
+    assert.ok(report.steps[1]!.screenshot);
+    assert.match(await readFile(textPath, "utf8"), /Screenshot:/);
   });
-  assert.equal(report.status, "failed");
-  assert.equal(report.steps[1]!.status, "failed");
-  assert.match(report.steps[1]!.error!, /Test Connection did not succeed: .*Failed to connect/);
-  assert.ok(report.steps.slice(2).every(step => step.status === "not-run"));
-  assert.ok(report.steps[1]!.screenshot);
-  assert.match(await readFile(textPath, "utf8"), /Screenshot:/);
+}
+
+// Compares saved evidence with an explicitly masked reference image on a page containing private fields.
+// Verifies credentials, custom configuration controls and editable inputs are masked and PNGs stay owner-only.
+test("failure screenshots mask sensitive inputs and have private file permissions", async t => {
+  const directory = await workspace(t);
+  const browser = await chromium.launch({ headless });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.setContent(`<input name="username" value="private-user"><input name="password" value="private-password">
+    <textarea>private-notes</textarea><div id="custom-config">private-config</div>
+    <div contenteditable>private-editable</div><input id="serverHost|input" value="private-host">`);
+  const config = await loadConfiguration();
+  config.configurationFields = { custom: "#custom-config" };
+  const expected = await page.screenshot({
+    mask: [page.locator('input, textarea, [contenteditable], #custom-config')]
+  });
+  const file = resolve(directory, "failure.png");
+  await saveFailureScreenshot(page, config, file);
+  assert.deepEqual(await readFile(file), expected);
+  if (process.platform !== "win32") assert.equal((await stat(file)).mode & 0o777, 0o600);
 });
 
 // An app that never shows the login form must fail the final step rather than pass by default.

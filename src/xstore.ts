@@ -91,7 +91,8 @@ export async function executeAction(
     }
     case "expectLogin":
       await field(s.loginReady).waitFor({ state: "visible" });
-      await expect(field(s.deviceErrorDialog), "device error dialog still blocking").toHaveCount(0);
+      await expect(field(s.deviceErrorDialog), "device error dialog still blocking")
+        .toBeHidden({ timeout: config.timeoutMs });
       break;
     case "login":
       await field(s.username).fill(data!.username!);
