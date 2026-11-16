@@ -64,6 +64,8 @@ test("configuration overrides are validated and base URL override wins", async t
   const config = await loadConfiguration(file, "https://test.example.com/pos/");
   assert.equal(config.baseUrl, "https://test.example.com/pos/");
   assert.equal(config.browserState, "fresh");
+  assert.equal(config.ignoreHttpsErrors, false);
+  assert.equal((await loadConfiguration("config/localhost-shell.json")).ignoreHttpsErrors, true);
   await writeFile(file, JSON.stringify({ browserState: "fresh" }));
   assert.equal((await loadConfiguration(file)).browserState, "fresh");
   assert.equal((await loadConfiguration("config/localhost.example.json")).browserState, "fresh");
@@ -77,7 +79,7 @@ test("configuration overrides are validated and base URL override wins", async t
   assert.equal(httpUrl("login", config.baseUrl), "https://test.example.com/pos/login");
   assert.equal(httpUrl("/login", config.baseUrl), "https://test.example.com/login");
   for (const input of [
-    { timeoutMs: 0 }, { browserState: "persistent" }, { browserState: null }, { timeoutMs: "100" }, { baseUrl: "file:///tmp/app" },
+    { timeoutMs: 0 }, { ignoreHttpsErrors: "yes" }, { browserState: "persistent" }, { browserState: null }, { timeoutMs: "100" }, { baseUrl: "file:///tmp/app" },
     { selectors: { usernme: "#user" } }, { selectors: { toString: "#x" } },
     { selectors: { username: "" } }, { unknownOption: true },
     { amountFormat: { decimalSeparator: ",", groupSeparator: "," } },
@@ -139,4 +141,35 @@ test("preflight rejects missing, malformed and mismatched input files without ex
   await writeFile(script, 'Open app at "javascript:alert(1)"');
   await assert.rejects(run(), /HTTP/);
   await assert.rejects(readJson(input + ".missing"), /ENOENT/);
+});
+
+// Checks the three shell-smoke keywords parse, and the smoke script plus its default inputs validate.
+// A dry run preflights smoke/shell-configuration.json (store, register, host, port) without a browser.
+test("smoke script parses and its shell configuration passes preflight", async t => {
+  const steps = parseScript(await readFile("smoke/xstore-is-running.xstore", "utf8"));
+  assert.deepEqual(steps.map(step => step.action.kind), ["open", "shellConfigure", "dismissDeviceError", "expectLogin"]);
+  const directory = await workspace(t);
+  const result = await runScript({
+    script: "smoke/xstore-is-running.xstore", config: await loadConfiguration("config/localhost-shell.json"),
+    dryRun: true, reportDir: directory
+  });
+  assert.equal(result.report.status, "passed");
+  assert.equal(JSON.parse(await readFile("smoke/shell-configuration.json", "utf8")).store, "721197");
+});
+
+// Rejects shell configuration files with missing/extra keys or an out-of-range port.
+// Values are not echoed since only keys and the port rule appear in the error text.
+test("shell configuration preflight rejects bad files", async t => {
+  const directory = await workspace(t);
+  const script = resolve(directory, "s.xstore");
+  const input = resolve(directory, "shell.json");
+  const config = await loadConfiguration();
+  await writeFile(script, 'Open app at "/"\nUse Xstore shell configuration from "shell.json" if prompted');
+  const run = () => runScript({ script, config, dryRun: true, reportDir: directory });
+  await writeFile(input, JSON.stringify({ store: "1", register: "1", host: "localhost" }));
+  await assert.rejects(run(), /exactly store, register, host, port/);
+  await writeFile(input, JSON.stringify({ store: "1", register: "1", host: "localhost", port: "70000" }));
+  await assert.rejects(run(), /port must be/);
+  await writeFile(input, JSON.stringify({ store: "1", register: "1", host: "localhost", port: "8443" }));
+  assert.equal((await run()).report.status, "passed");
 });

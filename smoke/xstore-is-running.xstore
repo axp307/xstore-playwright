@@ -1,0 +1,7 @@
+# Smoke test "Xstore is running": succeeds only when the real login screen is ready.
+# It never logs in and never starts a sale.
+# Run with: config/localhost-shell.json (opts in to the trusted localhost HTTPS certificate).
+1. Open app at "/xstoreshellapp/"
+2. Use Xstore shell configuration from "shell-configuration.json" if prompted
+3. Dismiss the device error prompt if shown
+4. Wait for the Xstore login screen

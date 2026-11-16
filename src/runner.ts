@@ -24,6 +24,7 @@ export interface StepResult {
   status: "not-run" | "planned" | "passed" | "skipped" | "failed";
   durationMs: number;
   error?: string;
+  screenshot?: string | undefined;
 }
 
 export interface RunReport {
@@ -34,6 +35,18 @@ export interface RunReport {
   durationMs: number;
   steps: StepResult[];
   error?: string;
+}
+
+// Checks a shell-setup input file has exactly store, register, host and a valid port.
+// Run during preflight so typos fail before the browser touches the real app.
+function validateShellSetup(values: Record<string, string>, line: number): void {
+  const keys = ["store", "register", "host", "port"];
+  if (Object.keys(values).sort().join() !== [...keys].sort().join()) {
+    throw new Error(`Line ${line}: shell configuration file must contain exactly ${keys.join(", ")}.`);
+  }
+  if (!/^[0-9]+$/.test(values.port!) || Number(values.port) < 1 || Number(values.port) > 65535) {
+    throw new Error(`Line ${line}: port must be a number from 1 to 65535.`);
+  }
 }
 
 // Runs a whole script: parse, preflight inputs, then dry-run or drive Chromium step by step.
@@ -48,9 +61,14 @@ export async function runScript(options: RunOptions): Promise<{
   for (const step of steps) {
     const action = step.action;
     if (action.kind === "open") httpUrl(action.target, options.config.baseUrl);
-    if (action.kind !== "configure" && action.kind !== "login") continue;
+    if (action.kind !== "configure" && action.kind !== "login" && action.kind !== "shellConfigure") continue;
     const file = resolve(dirname(resolve(options.script)), action.file);
     const values = strings(await readJson(file), `Input at line ${step.line}`);
+    if (action.kind === "shellConfigure") {
+      validateShellSetup(values, step.line);
+      data.set(step.line, values);
+      continue; // Store/register/host/port are project settings, not secrets, so they are not redacted.
+    }
     if (action.kind === "login") {
       if (!values.username || !values.password || Object.keys(values).length !== 2) {
         throw new Error(`Line ${step.line}: credential file must contain exactly username and password.`);
@@ -89,7 +107,7 @@ export async function runScript(options: RunOptions): Promise<{
     } else {
       browser = await chromium.launch({ headless: options.headless ?? false, slowMo: options.slowMo ?? 250 });
       // "fresh" = isolated, empty context per run; a future persistent mode would branch here.
-      const context = await browser.newContext();
+      const context = await browser.newContext({ ignoreHTTPSErrors: options.config.ignoreHttpsErrors });
       context.setDefaultTimeout(options.config.timeoutMs);
       context.setDefaultNavigationTimeout(options.config.timeoutMs);
       const page = await context.newPage();
@@ -103,6 +121,9 @@ export async function runScript(options: RunOptions): Promise<{
           result.status = "failed";
           result.error = redact(error instanceof Error ? error.message : String(error));
           report.status = "failed";
+          // Best-effort evidence of what the page showed; never masks the original failure.
+          const shot = resolve(directory, `${id}-line-${step.line}.png`);
+          result.screenshot = await page.screenshot({ path: shot }).then(() => shot, () => undefined);
         } finally {
           result.durationMs = Math.round(performance.now() - stepStarted);
           console.log(`[${result.status}] line ${result.line} (${result.durationMs} ms)`);
@@ -127,7 +148,7 @@ export async function runScript(options: RunOptions): Promise<{
       `Started: ${report.startedAt}`, `Finished: ${report.finishedAt}`,
       `Total: ${report.durationMs} ms`,
       ...report.steps.map(step =>
-        `${step.line}. [${step.status}] ${step.durationMs} ms - ${step.step}${step.error ? `\n   ${step.error}` : ""}`),
+        `${step.line}. [${step.status}] ${step.durationMs} ms - ${step.step}${step.error ? `\n   ${step.error}` : ""}${step.screenshot ? `\n   Screenshot: ${step.screenshot}` : ""}`),
       ...(report.error ? [`Run error: ${report.error}`] : [])
     ];
     await writeFile(jsonPath, JSON.stringify(report, null, 2) + "\n", { mode: 0o600 });

@@ -181,6 +181,7 @@ can still expose URLs, paths and UI text, so keep them private.
 | --- | --- | --- |
 | `baseUrl` | HTTP(S) origin; no embedded credentials | `http://localhost:8080` |
 | `timeoutMs` | Positive integer timeout for actions/navigation | `15000` |
+| `ignoreHttpsErrors` | Opt-in: accept a trusted self-signed HTTPS certificate for the run's context only | `false` |
 | `browserState` | Browser state per run. Only `"fresh"` (new isolated context) is supported; other values are rejected | `"fresh"` |
 | `selectors` | Overrides for named selectors (see below) | `defaultSelectors` |
 | `configurationFields` | Config-file key -> field selector | `storeId`, `registerId` inputs |
@@ -239,7 +240,38 @@ labels, but selectors have **not** been verified against a running Xstore.
   (rejected product, login failure with redaction, HTTP error). This proves the
   runner, not compatibility with an unobserved Xstore deployment.
 
-## 10. Roadmap / open questions (edit as the project matures)
+## 10. Smoke test: "Xstore is running" (live-verified shell flow)
+
+`smoke/xstore-is-running.xstore` + `config/localhost-shell.json` +
+`smoke/shell-configuration.json` verify the shell app reaches the real Xstore
+login screen (no login, no sale). Run:
+
+```sh
+npm start -- --script smoke/xstore-is-running.xstore --config config/localhost-shell.json --slow-mo 400 --report-dir reports/live
+```
+
+Keywords added: `Use Xstore shell configuration from "file" if prompted`
+(`shellConfigure`: Location Details, Connection Details, requires a Success
+Test Connection dialog, saves, Launch Xstore; skipped if the setup screen is
+absent), `Dismiss the device error prompt if shown` (`dismissDeviceError`, OK on
+a "Hardware Error" dialog if present) and `Wait for the Xstore login screen`
+(`expectLogin`). The shell file needs exactly `store`, `register`, `host`,
+`port` (strings, port 1-65535; not redacted since they are not secrets).
+
+Config: `ignoreHttpsErrors` (default `false`) sets Playwright's
+`ignoreHTTPSErrors` on the fresh context only, to trust localhost's
+self-signed certificate; no browser/system trust changes. Failures (service
+down, failed connection test, unknown screen, no login) are failed runs with a
+saved report and a per-step failure screenshot (`<run>-line-N.png`).
+
+Selectors for these screens (`shell*`, `deviceError*`, `loginReady`) were taken
+from the live app on 2026-11-16 (e.g. `#configMain`, `[id="storeNumber|input"]`,
+`oj-dialog`, `#focusBarInfoArea`). Observed behavior: the "Hardware Error"
+(barcode scanner) dialog appeared in some launches and not others, and one
+headed run timed out waiting for the setup screen (cause not determined), so
+treat timing as variable. Cash-sale selectors remain unverified.
+
+## 11. Roadmap / open questions (edit as the project matures)
 
 - Map and verify selectors against a live Xstore test environment.
 - Additional keywords (returns, other tenders, voids, assertions).

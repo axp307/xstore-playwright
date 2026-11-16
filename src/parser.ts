@@ -2,6 +2,9 @@ export type Action =
   | { kind: "open"; target: string }
   | { kind: "configure"; file: string }
   | { kind: "login"; file: string }
+  | { kind: "shellConfigure"; file: string }
+  | { kind: "dismissDeviceError" }
+  | { kind: "expectLogin" }
   | { kind: "startTransaction" }
   | { kind: "startSale" }
   | { kind: "addProducts"; products: string[] }
@@ -26,6 +29,12 @@ export function parseScript(source: string): Step[] {
       action = { kind: "open", target: match[1]! };
     } else if ((match = text.match(/^Use first-time configuration from "([^"]+)" if prompted$/i))) {
       action = { kind: "configure", file: match[1]! };
+    } else if ((match = text.match(/^Use Xstore shell configuration from "([^"]+)" if prompted$/i))) {
+      action = { kind: "shellConfigure", file: match[1]! };
+    } else if (/^Dismiss the device error prompt if shown$/i.test(text)) {
+      action = { kind: "dismissDeviceError" };
+    } else if (/^Wait for the Xstore login screen$/i.test(text)) {
+      action = { kind: "expectLogin" };
     } else if ((match = text.match(/^Log in using "([^"]+)"$/i))) {
       action = { kind: "login", file: match[1]! };
     } else if (/^Go to Start Transaction$/i.test(text)) {

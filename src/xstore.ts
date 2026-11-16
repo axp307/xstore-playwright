@@ -23,6 +23,32 @@ export function exactCashAmount(text: string, format: Configuration["amountForma
   return `${whole}${format.decimalSeparator}${(match[2] ?? "").padEnd(2, "0")}`;
 }
 
+// Drives the shell app's Location Details and Connection Details forms, then launches Xstore.
+// Throws unless Test Connection shows a Success dialog, so a bad host/port never reaches Launch.
+export async function completeShellSetup(
+  page: Page, config: Configuration, values: Record<string, string>
+): Promise<void> {
+  const s = config.selectors;
+  await page.locator(s.shellLocationDetails).click();
+  await page.locator(s.shellStore).fill(values.store!);
+  await page.locator(s.shellRegister).fill(values.register!);
+  await page.locator(s.shellSave).click();
+  await page.locator(s.shellConnectionDetails).click();
+  await page.locator(s.shellHost).fill(values.host!);
+  await page.locator(s.shellPort).fill(values.port!);
+  await page.locator(s.shellTestConnection).click();
+  const dialog = page.locator(s.shellDialog).first();
+  await dialog.waitFor({ state: "visible" });
+  if (!await page.locator(s.shellConnectionSuccess).isVisible()) {
+    const message = (await dialog.innerText()).replace(/\s+/g, " ").trim();
+    throw new Error(`Test Connection did not succeed: ${message}`);
+  }
+  await page.locator(s.shellDialogOk).click();
+  await dialog.waitFor({ state: "hidden" });
+  await page.locator(s.shellSave).click();
+  await page.locator(s.shellLaunch).click();
+}
+
 // Performs one parsed step in the browser using the configured selectors.
 // Returns "skipped" only for the conditional setup step; any failure is thrown to the runner.
 export async function executeAction(
@@ -48,6 +74,25 @@ export async function executeAction(
       await field(s.username).or(field(s.startTransaction)).filter({ visible: true }).first().waitFor();
       break;
     }
+    case "shellConfigure": {
+      // Conditional: only the shell setup screen triggers the two-form configuration and launch.
+      await field(s.shellConfigScreen).or(field(s.deviceErrorDialog)).or(field(s.loginReady))
+        .filter({ visible: true }).first().waitFor();
+      if (!await field(s.shellConfigScreen).isVisible()) return "skipped";
+      await completeShellSetup(page, config, data!);
+      break;
+    }
+    case "dismissDeviceError": {
+      await field(s.deviceErrorDialog).or(field(s.loginReady)).filter({ visible: true }).first().waitFor();
+      if (!await field(s.deviceErrorDialog).isVisible()) return "skipped";
+      await field(s.deviceErrorOk).click();
+      await field(s.deviceErrorDialog).waitFor({ state: "hidden" });
+      break;
+    }
+    case "expectLogin":
+      await field(s.loginReady).waitFor({ state: "visible" });
+      await expect(field(s.deviceErrorDialog), "device error dialog still blocking").toHaveCount(0);
+      break;
     case "login":
       await field(s.username).fill(data!.username!);
       await field(s.password).fill(data!.password!);

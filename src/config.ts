@@ -17,7 +17,24 @@ export const defaultSelectors = {
   amountDue: '[data-testid="amount-due"]',
   cashAmount: 'input[name="cashAmount"]',
   completeTransaction: 'button:has-text("Complete Transaction")',
-  transactionComplete: '[data-testid="transaction-complete"]'
+  transactionComplete: '[data-testid="transaction-complete"]',
+  // Xstore shell app (setup/launch) and login screen, discovered from the live app's DOM.
+  shellConfigScreen: '#configMain',
+  shellLocationDetails: 'role=button[name="Location Details"s]',
+  shellStore: '[id="storeNumber|input"]',
+  shellRegister: '[id="registerNumber|input"]',
+  shellSave: 'role=button[name="Save"s]',
+  shellConnectionDetails: 'role=button[name="Connection Details"s]',
+  shellHost: '[id="serverHost|input"]',
+  shellPort: '[id="serverPort|input"]',
+  shellTestConnection: 'role=button[name="Test Connection"s]',
+  shellDialog: 'oj-dialog',
+  shellConnectionSuccess: 'oj-dialog:has-text("Connection Test"):has-text("Success")',
+  shellDialogOk: 'oj-dialog >> role=button[name="OK"s]',
+  shellLaunch: 'role=button[name="Launch Xstore"s]',
+  deviceErrorDialog: 'oj-dialog:has-text("Hardware Error")',
+  deviceErrorOk: 'oj-dialog:has-text("Hardware Error") >> role=button[name="OK"s]',
+  loginReady: '#focusBarInfoArea:has-text("Log In") #focusBarInputField input'
 };
 
 export interface Configuration {
@@ -25,6 +42,8 @@ export interface Configuration {
   timeoutMs: number;
   // Only "fresh" exists today; a persistent-profile mode would be added here later.
   browserState: "fresh";
+  // Opt-in: accept the trusted localhost's self-signed HTTPS certificate for this run's context only.
+  ignoreHttpsErrors: boolean;
   selectors: typeof defaultSelectors;
   configurationFields: Record<string, string>;
   amountFormat: { decimalSeparator: string; groupSeparator: string; currencySymbol: string };
@@ -79,7 +98,7 @@ export function httpUrl(target: string, base?: string): string {
 // Merges selector overrides over defaultSelectors and rejects unknown keys or bad formats.
 export async function loadConfiguration(file?: string, baseUrl?: string): Promise<Configuration> {
   const raw = file ? object(await readJson(file), "Configuration") : {};
-  const allowed = ["baseUrl", "timeoutMs", "selectors", "configurationFields", "amountFormat", "browserState"];
+  const allowed = ["baseUrl", "timeoutMs", "selectors", "configurationFields", "amountFormat", "browserState", "ignoreHttpsErrors"];
   for (const key of Object.keys(raw)) {
     if (!allowed.includes(key)) throw new Error(`Unknown configuration key: ${key}`);
   }
@@ -89,6 +108,8 @@ export async function loadConfiguration(file?: string, baseUrl?: string): Promis
   if (browserState !== "fresh") {
     throw new Error('browserState must be "fresh"; persistent profiles are not supported yet.');
   }
+  const ignoreHttpsErrors = raw.ignoreHttpsErrors ?? false;
+  if (typeof ignoreHttpsErrors !== "boolean") throw new Error("ignoreHttpsErrors must be true or false.");
   const timeout = raw.timeoutMs ?? 15_000;
   if (typeof timeout !== "number" || !Number.isSafeInteger(timeout) || timeout <= 0) {
     throw new Error("timeoutMs must be a positive integer.");
@@ -118,6 +139,7 @@ export async function loadConfiguration(file?: string, baseUrl?: string): Promis
     baseUrl: httpUrl(base),
     timeoutMs: timeout,
     browserState,
+    ignoreHttpsErrors,
     selectors: { ...defaultSelectors, ...overrides },
     configurationFields: fields,
     amountFormat: format

@@ -53,6 +53,38 @@ runs. `npm run build` emits JavaScript; the built CLI is `node dist/src/cli.js`.
 changes POS state; there is no rollback or retry. Dry-run first, then validate
 selectors against your live test UI. Never point this at production accidentally.
 
+## Smoke test: "Xstore is running"
+
+`smoke/xstore-is-running.xstore` checks that the Xstore shell app is reachable,
+configures it if needed, launches it, and passes **only when the real Xstore
+login form is visibly ready**. It never logs in and never starts a sale.
+
+```sh
+npm start -- --script smoke/xstore-is-running.xstore --config config/localhost-shell.json --slow-mo 400 --report-dir reports/live
+```
+
+- `config/localhost-shell.json` sets `baseUrl` `https://localhost:8443` and
+  `"ignoreHttpsErrors": true`. This opt-in applies only to the run's browser
+  context (default `false`), so the trusted localhost self-signed certificate
+  is accepted without automating Chromium's "Advanced" interstitial and without
+  changing any browser/system trust. Do not enable it for untrusted hosts.
+- `smoke/shell-configuration.json` holds editable `store`, `register`, `host` and
+  `port` (all strings; port 1-65535). They are project settings, not secrets.
+- Steps: `Use Xstore shell configuration from "file" if prompted` (shell setup
+  screen only: Location Details -> Store/Register -> Save; Connection Details ->
+  Hostname/Port -> Test Connection; requires a *Success* dialog, else the step
+  fails before Launch; OK -> Save -> Launch Xstore; `skipped` if the setup screen
+  is absent), `Dismiss the device error prompt if shown` (presses OK on a
+  "Hardware Error" dialog, e.g. barcode scanner driver, when present; otherwise
+  `skipped`), and `Wait for the Xstore login screen` (fails unless the login
+  heading and input are visible and no hardware dialog remains).
+- An unreachable service, failed connection test, unknown screen, or missing
+  login screen is a **failed** run with a saved report (and a screenshot of the
+  page for the failing step, `*-line-N.png`), never a skipped success.
+- These shell selectors (`shell*`, `deviceError*`, `loginReady` in
+  `src/config.ts`) were discovered from the live app's DOM on 2026-11-16. The
+  later cash-sale selectors remain unverified.
+
 ## Script syntax
 
 One step per line. Keywords are case-insensitive, but quoted paths/URLs and
@@ -120,6 +152,7 @@ buttons fail rather than choosing an arbitrary match.
   "baseUrl": "http://localhost:8080",
   "timeoutMs": 20000,
   "browserState": "fresh",
+  "ignoreHttpsErrors": false,
   "selectors": {
     "configurationScreen": "#initial-setup",
     "username": "#operator-id",

@@ -205,3 +205,135 @@ test("HTTP errors fail navigation, produce a report, and stop subsequent steps",
   assert.match(report.steps[0]!.error!, /HTTP 503/);
   assert.ok(report.steps.slice(1).every(step => step.status === "not-run"));
 });
+
+// Starts a local HTTP server imitating the Xstore shell app: two setup forms, a Test Connection dialog,
+// Launch, an optional hardware-error dialog, then a login screen. Markup mirrors the selectors found live.
+async function shellMock(options: { failConnection?: boolean; deviceError?: boolean; noLogin?: boolean }) {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "Content-Type": "text/html" });
+    response.end(`<!doctype html><html><body><div id="root"></div><script>
+      const root = document.getElementById("root");
+      const saved = {};
+      function button(text, handler) {
+        const element = document.createElement("button");
+        element.textContent = text;
+        element.onclick = handler;
+        return element;
+      }
+      function field(id) { const e = document.createElement("input"); e.id = id; return e; }
+      function dialog(html, ok) {
+        const d = document.createElement("oj-dialog");
+        d.innerHTML = html;
+        d.append(button("OK", () => { d.remove(); ok && ok(); }));
+        document.body.append(d);
+      }
+      function main() {
+        root.innerHTML = '<div id="configMain"><p>Xstore Configuration</p></div>';
+        const area = root.firstChild;
+        area.append(button("Location Details", locationForm), button("Connection Details", connection),
+          button("Launch Xstore", launch));
+      }
+      function locationForm() {
+        root.innerHTML = "";
+        root.append(field("storeNumber|input"), field("registerNumber|input"), button("Back", main),
+          button("Save", () => { saved.store = document.getElementById("storeNumber|input").value;
+            saved.register = document.getElementById("registerNumber|input").value; main(); }));
+      }
+      function connection() {
+        root.innerHTML = "";
+        root.append(field("serverHost|input"), field("serverPort|input"), button("Back", main),
+          button("Test Connection", () => dialog(${JSON.stringify(options.failConnection
+            ? "<h2>Connection Test</h2><p>Failed to connect</p>" : "<h2>Connection Test</h2><p>Success</p>")})),
+          button("Save", () => { saved.host = document.getElementById("serverHost|input").value;
+            saved.port = document.getElementById("serverPort|input").value; main(); }));
+      }
+      function login() {
+        root.innerHTML = ${JSON.stringify(options.noLogin ? "<p>Loading</p>"
+          : '<div id="focusBarInfoArea"><h1>Log In</h1><div id="focusBarInputField"><input type="text"></div></div>')};
+        document.title = JSON.stringify(saved);
+      }
+      function launch() {
+        if (!saved.store || !saved.host) return;
+        ${options.deviceError ? 'dialog("<h2>Hardware Error</h2><p>scanner</p>", login)' : "login()"};
+      }
+      main();
+    </script></body></html>`);
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise<void>((resolve, reject) =>
+      server.close(error => error ? reject(error) : resolve()))
+  };
+}
+
+// Runs the smoke script against the shell mock with and without a hardware-error dialog.
+// Both must end at the login screen, with the dialog step reported as passed or skipped respectively.
+for (const deviceError of [true, false]) {
+  test(`smoke script reaches the login screen ${deviceError ? "after dismissing" : "without"} a device error`, async t => {
+    const directory = await workspace(t);
+    const app = await shellMock({ deviceError });
+    t.after(app.close);
+    const config = await loadConfiguration(undefined, app.url);
+    config.timeoutMs = 3000;
+    const { report } = await runScript({
+      script: "smoke/xstore-is-running.xstore", config, headless, slowMo, reportDir: directory
+    });
+    assert.equal(report.status, "passed", JSON.stringify(report));
+    assert.deepEqual(report.steps.map(step => step.status), [
+      "passed", "passed", deviceError ? "passed" : "skipped", "passed"
+    ]);
+  });
+}
+
+// A failed Test Connection dialog must fail the setup step and never press Launch.
+// Later steps stay not-run, and the report keeps the dialog text and a failure screenshot.
+test("a failed connection test fails the run before Launch", async t => {
+  const directory = await workspace(t);
+  const app = await shellMock({ failConnection: true });
+  t.after(app.close);
+  const config = await loadConfiguration(undefined, app.url);
+  config.timeoutMs = 3000;
+  const { report, textPath } = await runScript({
+    script: "smoke/xstore-is-running.xstore", config, headless, slowMo, reportDir: directory
+  });
+  assert.equal(report.status, "failed");
+  assert.equal(report.steps[1]!.status, "failed");
+  assert.match(report.steps[1]!.error!, /Test Connection did not succeed: .*Failed to connect/);
+  assert.ok(report.steps.slice(2).every(step => step.status === "not-run"));
+  assert.ok(report.steps[1]!.screenshot);
+  assert.match(await readFile(textPath, "utf8"), /Screenshot:/);
+});
+
+// An app that never shows the login form must fail the final step rather than pass by default.
+// Guards the "ends successfully only when the login screen is visibly ready" requirement.
+test("a missing login screen fails the smoke test", async t => {
+  const directory = await workspace(t);
+  const app = await shellMock({ noLogin: true });
+  t.after(app.close);
+  const config = await loadConfiguration(undefined, app.url);
+  config.timeoutMs = 800;
+  const { report } = await runScript({
+    script: "smoke/xstore-is-running.xstore", config, headless, slowMo, reportDir: directory
+  });
+  assert.equal(report.status, "failed");
+  assert.equal(report.steps[2]!.status, "failed");
+});
+
+// An unreachable server must produce a failed report whose first step records the network error.
+// Uses a closed local port so no real service is contacted.
+test("an unreachable app fails the first step with a saved report", async t => {
+  const directory = await workspace(t);
+  const app = await shellMock({});
+  const url = app.url;
+  await app.close();
+  const config = await loadConfiguration(undefined, url);
+  config.timeoutMs = 2000;
+  const { report, jsonPath } = await runScript({
+    script: "smoke/xstore-is-running.xstore", config, headless, slowMo, reportDir: directory
+  });
+  assert.equal(report.status, "failed");
+  assert.match(report.steps[0]!.error!, /ERR_CONNECTION_REFUSED/);
+  assert.equal(JSON.parse(await readFile(jsonPath, "utf8")).status, "failed");
+});
