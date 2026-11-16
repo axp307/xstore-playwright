@@ -46,6 +46,20 @@ export interface RunReport {
   error?: string;
 }
 
+// Formats the terminal completion line for a step from the same measured fields stored in the report.
+// Shows elapsed time as execution plus observation delay so console and report agree.
+export function formatStepLog(step: StepResult): string {
+  return `[${step.status}] line ${step.line} (elapsed ${step.durationMs} ms = execution ${step.executionMs} ms + observation delay ${step.observationDelayMs} ms)`;
+}
+
+// Formats the CLI end-of-run summary: summed step time versus wall-clock total.
+// The difference is browser startup/cleanup and other overhead outside any step.
+export function formatRunSummary(report: RunReport): string {
+  const overhead = Math.max(0, report.durationMs - report.stepExecutionMs - report.stepObservationDelayMs);
+  return `Run ${report.status}; steps: execution ${report.stepExecutionMs} ms + observation delay ${report.stepObservationDelayMs} ms; `
+    + `wall-clock total ${report.durationMs} ms (includes ~${overhead} ms browser startup/cleanup and other overhead).`;
+}
+
 // Checks a shell-setup input file has exactly store, register, host and a valid port.
 // Run during preflight so typos fail before the browser touches the real app.
 function validateShellSetup(values: Record<string, string>, line: number): void {
@@ -144,7 +158,7 @@ export async function runScript(options: RunOptions): Promise<{
           // Without a pause, execution is the whole step; otherwise it was captured before the pause.
           if (result.observationDelayMs === 0) result.executionMs = Math.round(performance.now() - stepStarted);
           result.durationMs = result.executionMs + result.observationDelayMs;
-          console.log(`[${result.status}] line ${result.line} (${result.durationMs} ms)`);
+          console.log(formatStepLog(result));
         }
         if (report.status === "failed") break;
       }

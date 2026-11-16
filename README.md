@@ -218,6 +218,10 @@ a monotonic clock. Each step has `durationMs` (elapsed) = `executionMs` +
 step passed). Run `durationMs` is wall-clock including browser startup/cleanup;
 `stepExecutionMs` and `stepObservationDelayMs` are the sums over steps, so
 `durationMs` is at least their total. Preflight/report writing is excluded.
+The terminal shows the same fields: each step logs
+`elapsed Z ms = execution X ms + observation delay Y ms`, and the final summary
+shows summed execution, summed delay and the wall-clock total with its
+startup/cleanup overhead.
 
 The first failed step stops execution, preserves its error and timing, marks
 remaining steps `not-run`, and exits nonzero. Browser startup/navigation/cleanup

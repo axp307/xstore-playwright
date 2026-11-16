@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { loadConfiguration } from "./config.js";
-import { runScript } from "./runner.js";
+import { formatRunSummary, runScript } from "./runner.js";
 
 // CLI entry point: parses flags, loads the environment config, and invokes the runner.
 // Prints report paths and sets a nonzero exit code when the run fails.
@@ -33,7 +33,7 @@ async function main(): Promise<void> {
     script: values.script, config, dryRun: values["dry-run"], headless: values.headless,
     slowMo, reportDir: values["report-dir"]
   });
-  console.log(`Run ${result.report.status}; total ${result.report.durationMs} ms.
+  console.log(`${formatRunSummary(result.report)}
 JSON: ${result.jsonPath}
 Text: ${result.textPath}`);
   if (result.report.status === "failed") {

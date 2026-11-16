@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { parseScript } from "../src/parser.js";
 import { exactCashAmount } from "../src/xstore.js";
 import { httpUrl, loadConfiguration, readJson } from "../src/config.js";
-import { runScript } from "../src/runner.js";
+import { formatRunSummary, formatStepLog, runScript } from "../src/runner.js";
 import { workspace } from "./helpers.js";
 
 // Verifies the sample script maps to the seven expected actions with original line numbers.
@@ -95,6 +95,16 @@ test("configuration overrides are validated and base URL override wins", async t
 
 // Runs the sample in dry-run mode and checks every step is planned with zero duration.
 // Confirms reports persist and example input values never appear in the text report.
+test("console formatters show the measured execution/observation-delay breakdown", () => {
+  const step = { line: 5, step: "x", status: "passed" as const, durationMs: 1250, executionMs: 250, observationDelayMs: 1000 };
+  assert.equal(formatStepLog(step), "[passed] line 5 (elapsed 1250 ms = execution 250 ms + observation delay 1000 ms)");
+  const summary = formatRunSummary({
+    mode: "browser", status: "passed", startedAt: "", finishedAt: "", durationMs: 2000,
+    stepExecutionMs: 500, stepObservationDelayMs: 1000, steps: [step]
+  });
+  assert.equal(summary, "Run passed; steps: execution 500 ms + observation delay 1000 ms; wall-clock total 2000 ms (includes ~500 ms browser startup/cleanup and other overhead).");
+});
+
 test("dry-run validates external files and writes planned steps without launching a browser", async t => {
   const directory = await workspace(t);
   const result = await runScript({

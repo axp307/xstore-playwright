@@ -72,7 +72,7 @@ flowchart LR
    Browser start/navigation/cleanup errors also yield a failed report.
 7. **Report**: `reports/run-<timestamp>-<id>.json` and `.txt` (git-ignored,
    mode `0600`) with status, start/finish, total ms, and per-step line, text,
-   status, duration, error. Durations use a monotonic clock. Each step records `durationMs` (elapsed) = `executionMs` (action time, includes `--slow-mo`) + `observationDelayMs` (measured `stepDelayMs` pause; 0 for dry-run/skipped/failed/not-run). The run records `stepExecutionMs` and `stepObservationDelayMs` sums; total includes
+   status, duration, error. Durations use a monotonic clock. Each step records `durationMs` (elapsed) = `executionMs` (action time, includes `--slow-mo`) + `observationDelayMs` (measured `stepDelayMs` pause; 0 for dry-run/skipped/failed/not-run). The run records `stepExecutionMs` and `stepObservationDelayMs` sums; the terminal step lines and final summary print the same fields (elapsed = execution + observation delay; wall-clock total includes startup/cleanup overhead); total includes
    browser startup/cleanup.
 
 Statuses: `planned`, `passed`, `skipped` (conditional step not needed),
