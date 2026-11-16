@@ -8,6 +8,8 @@ import { httpUrl, loadConfiguration, readJson } from "../src/config.js";
 import { runScript } from "../src/runner.js";
 import { workspace } from "./helpers.js";
 
+// Verifies the sample script maps to the seven expected actions with original line numbers.
+// Also checks product IDs keep leading zeros and repeats and keywords are case-insensitive.
 test("parses all sample keywords, preserving source line numbers and product IDs", async () => {
   const steps = parseScript(await readFile("examples/cash-sale.xstore", "utf8"));
   assert.deepEqual(steps.map(step => step.action.kind), [
@@ -19,6 +21,8 @@ test("parses all sample keywords, preserving source line numbers and product IDs
     { kind: "addProducts", products: ["000123", "000123"] });
 });
 
+// Confirms malformed or unknown steps throw at parse time, with the failing line number.
+// Guards against arbitrary commands or loosely matched sentences being accepted.
 test("rejects unsupported syntax and malformed product lists before execution", () => {
   for (const source of [
     "", "# no steps", "Log in using \"creds.json\"", 'Open app at "/" trailing',
@@ -30,6 +34,8 @@ test("rejects unsupported syntax and malformed product lists before execution", 
   assert.throws(() => parseScript('Open app at "/"\n\n# comment\nUnknown action'), /Line 4/);
 });
 
+// Checks exactCashAmount normalizes valid amounts without float rounding, incl. locale formats.
+// Also asserts ambiguous strings (labels, negatives, 3 decimals) are rejected.
 test("cash parsing is exact, supports grouping and alternate separators, rejects ambiguous amounts", async () => {
   const { amountFormat } = await loadConfiguration();
   for (const [input, expected] of [
@@ -46,6 +52,8 @@ test("cash parsing is exact, supports grouping and alternate separators, rejects
   }
 });
 
+// Verifies config loading: --base-url precedence, selector merging, and URL resolution rules.
+// Iterates invalid configs (bad types, unknown keys, bad separators) that must be rejected.
 test("configuration overrides are validated and base URL override wins", async t => {
   const directory = await workspace(t);
   const file = resolve(directory, "config.json");
@@ -73,6 +81,8 @@ test("configuration overrides are validated and base URL override wins", async t
   assert.throws(() => httpUrl("https://user:password@example.com"));
 });
 
+// Runs the sample in dry-run mode and checks every step is planned with zero duration.
+// Confirms reports persist and example input values never appear in the text report.
 test("dry-run validates external files and writes planned steps without launching a browser", async t => {
   const directory = await workspace(t);
   const result = await runScript({
@@ -90,6 +100,8 @@ test("dry-run validates external files and writes planned steps without launchin
   assert.doesNotMatch(text, /REPLACE_ME|DEMO_USER|DEMO_REGISTER/);
 });
 
+// Feeds missing, malformed, and mismatched input files to preflight.
+// Each must fail before any browser launch, without echoing file contents in the error.
 test("preflight rejects missing, malformed and mismatched input files without exposing their contents", async t => {
   const directory = await workspace(t);
   const script = resolve(directory, "test.xstore");

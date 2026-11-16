@@ -2,6 +2,8 @@ import { parseArgs } from "node:util";
 import { loadConfiguration } from "./config.js";
 import { runScript } from "./runner.js";
 
+// CLI entry point: parses flags, loads the environment config, and invokes the runner.
+// Prints report paths and sets a nonzero exit code when the run fails.
 async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
@@ -40,6 +42,7 @@ Text: ${result.textPath}`);
   }
 }
 
+// Top-level guard so setup/preflight errors print a clean message and exit nonzero.
 main().catch(error => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;

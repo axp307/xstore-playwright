@@ -28,6 +28,8 @@ export interface Configuration {
   amountFormat: { decimalSeparator: string; groupSeparator: string; currencySymbol: string };
 }
 
+// Narrows an unknown JSON value to a plain object or throws with a labelled message.
+// Shared guard so every config/input shape error names the offending section.
 export function object(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${label} must be a JSON object.`);
@@ -35,6 +37,8 @@ export function object(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+// Validates that a JSON object maps keys to non-empty strings and returns it typed.
+// Used for credential, configuration-field, and selector override maps.
 export function strings(value: unknown, label: string): Record<string, string> {
   const entries = object(value, label);
   const result: Record<string, string> = {};
@@ -47,6 +51,8 @@ export function strings(value: unknown, label: string): Record<string, string> {
   return result;
 }
 
+// Reads and parses a JSON file, hiding parser excerpts that could leak secret values.
+// Missing-file errors pass through unchanged so callers can report the path.
 export async function readJson(file: string): Promise<unknown> {
   try {
     return JSON.parse(await readFile(file, "utf8")) as unknown;
@@ -57,6 +63,8 @@ export async function readJson(file: string): Promise<unknown> {
   }
 }
 
+// Resolves a script target against the base URL and allows only credential-free HTTP(S).
+// Blocks file:/javascript: schemes and user:password@ URLs from reaching the browser.
 export function httpUrl(target: string, base?: string): string {
   const url = new URL(target, base);
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
@@ -65,6 +73,8 @@ export function httpUrl(target: string, base?: string): string {
   return url.href;
 }
 
+// Builds the validated environment configuration from an optional JSON file and --base-url.
+// Merges selector overrides over defaultSelectors and rejects unknown keys or bad formats.
 export async function loadConfiguration(file?: string, baseUrl?: string): Promise<Configuration> {
   const raw = file ? object(await readJson(file), "Configuration") : {};
   const allowed = ["baseUrl", "timeoutMs", "selectors", "configurationFields", "amountFormat"];

@@ -4,6 +4,8 @@ import type { Configuration } from "./config.js";
 import { httpUrl } from "./config.js";
 import type { Action } from "./parser.js";
 
+// Converts displayed amount-due text into the string typed into the cash field.
+// Works on strings only (no floats) and rejects labels, negatives or ambiguous formats.
 export function exactCashAmount(text: string, format: Configuration["amountFormat"]): string {
   let value = text.trim();
   if (format.currencySymbol && value.startsWith(format.currencySymbol)) {
@@ -21,6 +23,8 @@ export function exactCashAmount(text: string, format: Configuration["amountForma
   return `${whole}${format.decimalSeparator}${(match[2] ?? "").padEnd(2, "0")}`;
 }
 
+// Performs one parsed step in the browser using the configured selectors.
+// Returns "skipped" only for the conditional setup step; any failure is thrown to the runner.
 export async function executeAction(
   page: Page, action: Action, config: Configuration, data?: Record<string, string>
 ): Promise<"passed" | "skipped"> {

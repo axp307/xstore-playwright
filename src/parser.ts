@@ -13,6 +13,8 @@ export interface Step {
   action: Action;
 }
 
+// Turns script text into typed steps by matching each line against the fixed keyword patterns.
+// Rejects unknown lines (with line numbers) before any browser work, so typos fail fast.
 export function parseScript(source: string): Step[] {
   const steps: Step[] = [];
   for (const [index, raw] of source.split(/\r?\n/).entries()) {

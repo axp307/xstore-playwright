@@ -18,6 +18,8 @@ interface MockState {
   completed: boolean;
 }
 
+// Starts a local HTTP server serving a fake POS page plus a /record endpoint.
+// Options inject failures (rejected product, bad login, HTTP 503) and capture what the runner submitted.
 async function mock(options: { setup: boolean; rejectProduct?: boolean; failLogin?: boolean; httpError?: boolean }) {
   const state: MockState = {
     configuration: undefined, username: undefined, products: [], tender: undefined, completed: false
@@ -34,15 +36,21 @@ async function mock(options: { setup: boolean; rejectProduct?: boolean; failLogi
     response.end(`<!doctype html><html><body><main></main><script>
       const main = document.querySelector("main");
       const products = [];
+      // Posts observed UI input back to the test server so assertions can inspect it.
+      // Keeps the mock stateless in the page while the server holds the evidence.
       async function record(value) {
         await fetch("/record", { method: "POST", body: JSON.stringify(value) });
       }
+      // Appends a labelled button wired to a handler, standing in for POS screen controls.
+      // Labels match the default selectors (e.g. has-text("Log In")).
       function button(text, handler) {
         const element = document.createElement("button");
         element.textContent = text;
         element.onclick = handler;
         main.append(element);
       }
+      // Renders the login screen and, on valid demo credentials, advances to Start Transaction -> Sale -> DIY.
+      // Credentials are checked in-page so the runner's external-file input is really exercised.
       function login() {
         main.innerHTML = '<input name="username"><input name="password" type="password">';
         button("Log In", async () => {
@@ -60,6 +68,8 @@ async function mock(options: { setup: boolean; rejectProduct?: boolean; failLogi
           });
         });
       }
+      // Renders the first-time configuration screen and records the submitted store/register.
+      // Proceeds to login after saving, mimicking the conditional setup flow.
       function setup() {
         main.innerHTML = '<section data-testid="first-time-configuration"><input name="storeId"><input name="registerId"></section>';
         button("Save Configuration", async () => {
@@ -70,6 +80,8 @@ async function mock(options: { setup: boolean; rejectProduct?: boolean; failLogi
           login();
         });
       }
+      // Renders the sale screen: add products, check out, and tender cash against a fixed $1,234.56 due.
+      // Only an exact tender completes the transaction, so wrong amounts are detectable.
       function cart() {
         main.innerHTML = '<input name="productId"><div id="items"></div>';
         button("Add Product", async () => {
@@ -108,6 +120,8 @@ async function mock(options: { setup: boolean; rejectProduct?: boolean; failLogi
   };
 }
 
+// Runs the full sample against the mock twice, with and without the first-time setup screen.
+// Asserts step statuses, exact submitted data, and that the persisted report matches.
 for (const setup of [true, false]) {
   test(`real Chromium completes a cash sale with setup ${setup ? "present" : "absent"}`, async t => {
     const directory = await workspace(t);
@@ -133,6 +147,8 @@ for (const setup of [true, false]) {
   });
 }
 
+// Makes the mock ignore product adds to prove the scan step fails on the cart-count check.
+// Later steps must be not-run and no tender may be sent.
 test("a rejected product fails the scan step and never tenders the transaction", async t => {
   const directory = await workspace(t);
   const app = await mock({ setup: false, rejectProduct: true });
@@ -152,6 +168,8 @@ test("a rejected product fails the scan step and never tenders the transaction",
   assert.match(await readFile(textPath, "utf8"), /\[not-run\]/);
 });
 
+// Forces a login-step failure whose Playwright error text contains the secret password.
+// Verifies the persisted JSON and text reports redact it.
 test("a login failure redacts external credentials from the persisted error", async t => {
   const directory = await workspace(t);
   const app = await mock({ setup: false });
@@ -172,6 +190,8 @@ test("a login failure redacts external credentials from the persisted error", as
   }
 });
 
+// Serves HTTP 503 so the first navigation step fails.
+// Checks the failure is reported with its status and all remaining steps are not-run.
 test("HTTP errors fail navigation, produce a report, and stop subsequent steps", async t => {
   const directory = await workspace(t);
   const app = await mock({ setup: false, httpError: true });

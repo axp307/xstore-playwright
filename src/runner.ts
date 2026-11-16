@@ -36,6 +36,8 @@ export interface RunReport {
   error?: string;
 }
 
+// Runs a whole script: parse, preflight inputs, then dry-run or drive Chromium step by step.
+// Times every step, stops at the first failure, redacts secrets, and writes JSON/text reports.
 export async function runScript(options: RunOptions): Promise<{
   report: RunReport; jsonPath: string; textPath: string;
 }> {
