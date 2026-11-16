@@ -1,0 +1,24 @@
+{
+  "name": "xstore-playwright",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deterministic, observable Xstore POS test scripts",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "tsx src/cli.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:browser": "node --import tsx --test tests/browser.integration.ts",
+    "dry-run": "tsx src/cli.ts --script examples/cash-sale.xstore --config config/localhost.example.json --dry-run"
+  },
+  "dependencies": {
+    "playwright": "^1.56.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}
