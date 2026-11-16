@@ -1,9 +1,8 @@
 # Framework Technical Overview
 
-> Wiki-ready page. Source of truth lives in `docs/wiki/`; copy it into a GitHub
-> Wiki page (e.g. `Framework-Technical-Overview`) when a remote exists. This
-> repo currently has no GitHub remote, so nothing has been published.
-> Reflects commit `49e435f`; update as the implementation changes.
+> Source of truth: `docs/wiki/Framework-Technical-Overview.md` in
+> [axp307/xstore-playwright](https://github.com/axp307/xstore-playwright).
+> Keep the GitHub Wiki copy synchronized with this file as the framework evolves.
 
 ## 1. Purpose
 
@@ -16,9 +15,10 @@ Goals: watchable (headed browser, `slowMo`), reproducible, and ending with a
 report of each step's status and duration plus a total.
 
 > **Integration boundary:** the runner and mock workflow are verified. The
-> default Xstore selectors are **illustrative and unverified** against any real
+> cash-sale selectors are **illustrative and unverified** against a real
 > Xstore/Sherwin-Williams deployment. They must be mapped to the actual web UI
-> before running a real sale. Native/desktop Xstore screens are out of scope.
+> before running a real sale. The shell smoke flow was verified live (section 10).
+> Native/desktop Xstore screens are out of scope.
 
 ## 2. Architecture
 
@@ -216,8 +216,8 @@ Known assumptions to validate against the real deployment:
 - Extra prompts (customer lookup, receipts, tax dialogs, store-specific login)
   need explicit new actions.
 
-The customization source at `na-pos` (e.g. `shw_xstore/`) may help find screen
-labels, but selectors have **not** been verified against a running Xstore.
+Deployment-specific customization source may help find screen labels.
+Cash-sale selectors have **not** been verified against a running Xstore.
 
 ## 8. Adding a new keyword
 
@@ -279,4 +279,4 @@ treat timing as variable. Cash-sale selectors remain unverified.
 - Screenshots/traces on failure; retries; per-step timing aggregates.
 - Persistent browser profile as a new `browserState` value (extension point: `newContext()` in `src/runner.ts`).
 - Remote-server environment configs and CI usage.
-- Publish this page to the GitHub Wiki once a remote repository exists.
+- Keep the GitHub Wiki synchronized with this version-controlled page.
