@@ -1,0 +1,7 @@
+{
+  "baseUrl": "https://localhost:8443",
+  "timeoutMs": 30000,
+  "browserState": "fresh",
+  "ignoreHttpsErrors": true,
+  "stepDelayMs": 1000
+}

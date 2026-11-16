@@ -1,0 +1,9 @@
+# Relative file paths are resolved from this script's directory.
+# Replace example inputs with ignored secrets files before a real run.
+1. Open app at "/"
+2. Use first-time configuration from "configuration.example.json" if prompted
+3. Log in using "credentials.example.json"
+4. Go to Start Transaction
+5. Start a sale as a DIY Customer
+6. Add products 650921315, 651234940
+7. Check out with cash using the exact amount due
