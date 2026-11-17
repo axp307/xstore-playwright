@@ -1,6 +1,6 @@
-# Framework Technical Overview
+# Technical Overview
 
-> Source of truth: `docs/wiki/Framework-Technical-Overview.md` in
+> Source of truth: `docs/wiki/Technical-Overview.md` in
 > [axp307/xstore-playwright](https://github.com/axp307/xstore-playwright).
 > Keep the GitHub Wiki copy synchronized with this file as the framework evolves.
 
