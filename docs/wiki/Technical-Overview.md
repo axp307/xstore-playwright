@@ -146,6 +146,33 @@ their exact content.
 | `Start a sale as a DIY Customer` | Clicks Sale, then DIY Customer |
 | `Add products <id>[, <id>...]` | Per ID: fills, adds, then waits for the cart line count to increase. Leading zeros and repeats preserved. |
 | `Check out with cash using the exact amount due` | Checkout -> Cash -> reads amount due -> enters exact amount -> completes -> waits for completion marker |
+| `Log in at the Xstore login screen using "file"` | Types the user ID in the focus bar, Enter, types the password in the password dialog, Enter, waits for the Main Menu (Log Out button). Xstore shows Start Transaction before sign-on, so this must come before starting a sale. File: exactly `username` and `password`; not redacted in reports (shared developer login). |
+| `Click on "Start Transaction"` | Clicks the Main Menu Start Transaction card and waits for Customer Lookup |
+| `Skip customer lookup` | Clicks Skip and waits for the Shopping Cart scan field |
+| `Scan sale items from "file"` | Per item in the file: types the sale ID in the scan field, presses Enter, waits for the cart line count to grow |
+| `Click on "Amount Due"` | Clicks the Amount Due button and waits for the Payment Options |
+| `Note the amount due and click on "Cash"` | Records the Payment Options amount due, then clicks the Cash tender card |
+| `Enter the exact amount due and press Enter` | Types the noted amount on the (read-only) tender keypad field, checks the field shows it, presses Enter |
+| `Wait for the Customer Lookup or Main Menu screen` | Waits for the tender dialog to close and Customer Lookup (or Start Transaction) to show |
+
+### DIY Sale with Cash
+
+`diy-sale/diy-sale-with-cash.xstore` completes a no-account cash sale. Run it
+against an authorized test instance:
+
+```sh
+npm start -- --script diy-sale/diy-sale-with-cash.xstore \
+  --config config/localhost-shell.json --slow-mo 400 --report-dir reports/live
+```
+
+Items come from `diy-sale/sale-items.json`:
+`{"items": [{"saleId": "650427503", "quantity": 1}, ...]}`. `quantity` is
+validated but not yet applied; Xstore's default quantity is used. Xstore keeps
+transaction state server-side, so a failed run can leave a sale open or the
+cashier signed in; cancel the sale and log out before rerunning (step 4 expects
+the login screen). Login uses the generic developer login in
+`config/xstore-login.json`. This script has been verified live through
+Login -> Main Menu -> Customer Lookup -> Shopping Cart -> Payment Options -> Cash tender -> back to Customer Lookup.
 
 Restrictions: paths must be double-quoted; no inline comments, escaped quotes,
 multiline steps, interpolation, or embedded code.

@@ -1,0 +1,17 @@
+# Test "DIY Sale with Cash": completes a cash sale without a personal user account.
+# Steps 1-3 match the smoke test. Steps 4-5 are optional: when Xstore is already signed in
+# (no login form), they are skipped. Otherwise step 5 signs in with the generic developer login
+# (Start Transaction is visible before sign-on, so the login must come first).
+# Run with: config/localhost-shell.json (opts in to the trusted localhost HTTPS certificate).
+1. Open app at "/xstoreshellapp/"
+2. Use Xstore shell configuration from "../smoke/shell-configuration.json" if prompted
+3. Dismiss the device error prompt if shown
+4. Wait for the Xstore login screen if shown
+5. Log in at the Xstore login screen using "../config/xstore-login.json" if shown
+6. Click on "Start Transaction"
+7. Skip customer lookup
+8. Scan sale items from "sale-items.json"
+9. Click on "Amount Due"
+10. Note the amount due and click on "Cash"
+11. Enter the exact amount due and press Enter
+12. Wait for the Customer Lookup or Main Menu screen

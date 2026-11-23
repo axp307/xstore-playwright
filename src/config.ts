@@ -1,6 +1,24 @@
 import { readFile } from "node:fs/promises";
 
+/**
+ * Central registry of every UI selector the framework uses.
+ *
+ * VERIFIED vs. GUESSED:
+ * - Only entries under a "VERIFIED" section comment were discovered from the live app's DOM
+ *   (shell*, deviceError*, loginReady, and the DIY-sale entries such as scanInput/saleLines).
+ * - Every entry under the "GUESSED" section comment is a placeholder (generic data-testid values,
+ *   `button:has-text(...)`, `input[name=...]`) that was never checked against a running Xstore,
+ *   so the real labels/attributes will almost certainly differ.
+ *
+ * Guidance for developers: before relying on a guessed selector, open the real Xstore screen
+ * (headed, with --slow-mo), inspect the element, and replace the value here (or override it per
+ * environment via the `selectors` key of the config JSON). Prefer stable ids/roles over text,
+ * keep each selector matching exactly one visible element, and move the entry into the verified
+ * block once confirmed.
+ */
 export const defaultSelectors = {
+  // --- GUESSED selectors (unverified against a live Xstore) ---
+  // First-time configuration form; the data-testid is invented.
   configurationScreen: '[data-testid="first-time-configuration"]',
   configurationSubmit: 'button:has-text("Save Configuration")',
   username: 'input[name="username"]',
@@ -18,6 +36,28 @@ export const defaultSelectors = {
   cashAmount: 'input[name="cashAmount"]',
   completeTransaction: 'button:has-text("Complete Transaction")',
   transactionComplete: '[data-testid="transaction-complete"]',
+  // --- VERIFIED selectors (DIY Sale with Cash flow, checked against the live Xstore 24.0 tablet UI) ---
+  // Login uses the focus-bar input (loginReady) for the user ID, then a password dialog.
+  loginPasswordInput: '#LOGIN_USER_PWD input[type="password"]',
+  // Main Menu marker: only present once a cashier is signed in.
+  mainMenuLogOut: 'role=button[name="Log Out"s]',
+  // Menu card; the same text is visible on the login screen, where clicking it does not start a sale.
+  startTransactionCard: ':text-is("Start Transaction")',
+  customerLookupSkip: 'role=button[name="Skip"s]',
+  // Same focus-bar input the login screen uses; on the Shopping Cart it takes scanned sale IDs.
+  scanInput: '#focusBarInputField input',
+  // One element per sale line ("listItem sli_<txn>_<line>"); the list's empty-state row does not match.
+  saleLines: '.xstore-sale-list-sizing [id^="listItem sli_"]',
+  // The button title reads "Amount Due $<total>", so the total is parsed from its text.
+  amountDueButton: 'oj-button[title^="Amount Due"]',
+  // On the Payment Options screen the total is plain text (the button above is gone).
+  paymentAmountDue: 'div.oj-typography-subheading-lg:has-text("Amount Due")',
+  // Tender options are action cards (not buttons), so role-based button lookups do not match them.
+  cashTender: '.xstore-tender-card-sizing:has(:text-is("Cash"))',
+  tenderDialog: '#ENTER_TENDER_AMOUNT',
+  // Read-only keypad field: it must be typed into via the keyboard, never fill().
+  tenderInput: '#ENTER_TENDER_AMOUNT input',
+  // --- VERIFIED selectors ---
   // Xstore shell app (setup/launch) and login screen, discovered from the live app's DOM.
   shellConfigScreen: '#configMain',
   shellLocationDetails: 'role=button[name="Location Details"s]',
@@ -74,6 +114,35 @@ export function strings(value: unknown, label: string): Record<string, string> {
   return result;
 }
 
+export interface SaleItem {
+  saleId: string;
+  // Validated and kept for future use; the DIY cash sale currently leaves Xstore's default quantity.
+  quantity: number;
+}
+
+// Validates a sale-items file: {"items": [{"saleId": "<digits>", "quantity": <positive integer>}, ...]}.
+// Order is preserved and repeats are allowed, since each entry is one scan.
+export function saleItems(value: unknown, label: string): SaleItem[] {
+  const root = object(value, label);
+  if (Object.keys(root).join() !== "items" || !Array.isArray(root.items) || !root.items.length) {
+    throw new Error(`${label} must contain only a non-empty "items" array.`);
+  }
+  return root.items.map((entry, index) => {
+    const item = object(entry, `${label}.items[${index}]`);
+    const { saleId, quantity } = item;
+    if (Object.keys(item).sort().join() !== "quantity,saleId") {
+      throw new Error(`${label}.items[${index}] must contain exactly saleId and quantity.`);
+    }
+    if (typeof saleId !== "string" || !/^[0-9]+$/.test(saleId)) {
+      throw new Error(`${label}.items[${index}].saleId must be a string of digits.`);
+    }
+    if (typeof quantity !== "number" || !Number.isSafeInteger(quantity) || quantity < 1) {
+      throw new Error(`${label}.items[${index}].quantity must be a positive integer.`);
+    }
+    return { saleId, quantity };
+  });
+}
+
 // Reads and parses a JSON file, hiding parser excerpts that could leak secret values.
 // Missing-file errors pass through unchanged so callers can report the path.
 export async function readJson(file: string): Promise<unknown> {
@@ -124,6 +193,7 @@ export async function loadConfiguration(file?: string, baseUrl?: string): Promis
   for (const key of Object.keys(overrides)) {
     if (!Object.hasOwn(defaultSelectors, key)) throw new Error(`Unknown selector: ${key}`);
   }
+  // GUESS: these field selectors for first-time configuration are placeholders; verify against Xstore.
   const fields = raw.configurationFields === undefined
     ? { storeId: 'input[name="storeId"]', registerId: 'input[name="registerId"]' }
     : strings(raw.configurationFields, "configurationFields");

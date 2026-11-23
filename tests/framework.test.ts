@@ -186,3 +186,50 @@ test("shell configuration preflight rejects bad files", async t => {
   await writeFile(input, JSON.stringify({ store: "1", register: "1", host: "localhost", port: "8443" }));
   assert.equal((await run()).report.status, "passed");
 });
+
+// Checks the DIY cash-sale script parses to the expected actions and its sale-items file passes preflight.
+// Also verifies the amount-due text from the Amount Due button/label is reduced to the typed amount.
+test("DIY sale with cash script parses and preflights its sale items", async t => {
+  const steps = parseScript(await readFile("diy-sale/diy-sale-with-cash.xstore", "utf8"));
+  assert.deepEqual(steps.map(step => step.action.kind), [
+    "open", "shellConfigure", "dismissDeviceError", "expectLogin", "xstoreLogin", "clickStartTransaction",
+    "skipCustomerLookup", "scanItems", "clickAmountDue", "selectCash", "enterExactCash", "expectSaleComplete"
+  ]);
+  const directory = await workspace(t);
+  const result = await runScript({
+    script: "diy-sale/diy-sale-with-cash.xstore", config: await loadConfiguration("config/localhost-shell.json"),
+    dryRun: true, reportDir: directory
+  });
+  assert.equal(result.report.status, "passed");
+  assert.equal(exactCashAmount("Amount Due $513.17", { decimalSeparator: ".", groupSeparator: ",", currencySymbol: "$" }), "513.17");
+});
+
+// Rejects malformed sale-items files (shape, non-numeric IDs, non-positive quantities) before any browser work.
+test("sale items preflight rejects bad files", async t => {
+  const directory = await workspace(t);
+  const script = resolve(directory, "s.xstore");
+  const input = resolve(directory, "items.json");
+  const config = await loadConfiguration();
+  await writeFile(script, 'Open app at "/"\nScan sale items from "items.json"');
+  const run = () => runScript({ script, config, dryRun: true, reportDir: directory });
+  for (const [value, message] of [
+    [{}, /non-empty "items" array/],
+    [{ items: [] }, /non-empty "items" array/],
+    [{ items: [{ saleId: "12" }] }, /exactly saleId and quantity/],
+    [{ items: [{ saleId: "abc", quantity: 1 }] }, /saleId must be a string of digits/],
+    [{ items: [{ saleId: "123", quantity: 0 }] }, /quantity must be a positive integer/]
+  ] as const) {
+    await writeFile(input, JSON.stringify(value));
+    await assert.rejects(run(), message);
+  }
+  await writeFile(input, JSON.stringify({ items: [{ saleId: "650427503", quantity: 1 }] }));
+  assert.equal((await run()).report.status, "passed");
+});
+
+// Checks the "if shown" suffix makes the login-screen wait and login steps optional, and only those.
+test("login steps accept an optional 'if shown' suffix", () => {
+  const steps = parseScript('Open app at "/"\nWait for the Xstore login screen if shown\nLog in at the Xstore login screen using "l.json" if shown\nWait for the Xstore login screen');
+  assert.deepEqual(steps.slice(1).map(step => step.action), [
+    { kind: "expectLogin", optional: true }, { kind: "xstoreLogin", file: "l.json", optional: true }, { kind: "expectLogin" }
+  ]);
+});
