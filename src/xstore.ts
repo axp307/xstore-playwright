@@ -85,6 +85,7 @@ export async function executeAction(
     case "shellConfigure": {
       // Conditional: only the shell setup screen triggers the two-form configuration and launch.
       await field(s.shellConfigScreen).or(field(s.deviceErrorDialog)).or(field(s.loginReady))
+        .or(field(s.mainMenuLogOut)).or(field(s.customerLookupSkip))
         .filter({ visible: true }).first().waitFor();
       if (!await field(s.shellConfigScreen).isVisible()) return "skipped";
       await completeShellSetup(page, config, data!);
@@ -192,7 +193,7 @@ export async function executeAction(
     }
     case "expectSaleComplete":
       await field(s.tenderDialog).waitFor({ state: "hidden" });
-      await field(s.customerLookupSkip).or(field(s.startTransaction)).filter({ visible: true }).first().waitFor();
+      await field(s.customerLookupSkip).or(field(s.mainMenuLogOut)).filter({ visible: true }).first().waitFor();
       break;
     case "cashCheckout":
       await field(s.checkout).click();

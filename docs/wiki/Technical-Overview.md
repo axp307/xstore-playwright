@@ -153,7 +153,7 @@ their exact content.
 | `Click on "Amount Due"` | Clicks the Amount Due button and waits for the Payment Options |
 | `Note the amount due and click on "Cash"` | Records the Payment Options amount due, then clicks the Cash tender card |
 | `Enter the exact amount due and press Enter` | Types the noted amount on the (read-only) tender keypad field, checks the field shows it, presses Enter |
-| `Wait for the Customer Lookup or Main Menu screen` | Waits for the tender dialog to close and Customer Lookup (or Start Transaction) to show |
+| `Wait for the Customer Lookup or Main Menu screen` | Waits for the tender dialog to close and Customer Lookup (or the Main Menu Log Out button) to show |
 
 ### DIY Sale with Cash
 
