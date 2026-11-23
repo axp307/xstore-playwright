@@ -4,8 +4,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
-import { httpUrl, readJson, strings } from "./config.js";
-import type { Configuration } from "./config.js";
+import { httpUrl, readJson, saleItems, strings } from "./config.js";
+import type { Configuration, SaleItem } from "./config.js";
 import { parseScript } from "./parser.js";
 import { executeAction } from "./xstore.js";
 
@@ -92,12 +92,18 @@ export async function runScript(options: RunOptions): Promise<{
 }> {
   const steps = parseScript(await readFile(options.script, "utf8"));
   const data = new Map<number, Record<string, string>>();
+  const items = new Map<number, SaleItem[]>();
   const secretValues: string[] = [];
   // Preflight every input before opening a browser or changing POS state.
   for (const step of steps) {
     const action = step.action;
     if (action.kind === "open") httpUrl(action.target, options.config.baseUrl);
-    if (action.kind !== "configure" && action.kind !== "login" && action.kind !== "shellConfigure") continue;
+    if (action.kind === "scanItems") {
+      const file = resolve(dirname(resolve(options.script)), action.file);
+      items.set(step.line, saleItems(await readJson(file), `Sale items at line ${step.line}`));
+      continue; // Sale IDs are catalog data, not secrets.
+    }
+    if (action.kind !== "configure" && action.kind !== "login" && action.kind !== "xstoreLogin" && action.kind !== "shellConfigure") continue;
     const file = resolve(dirname(resolve(options.script)), action.file);
     const values = strings(await readJson(file), `Input at line ${step.line}`);
     if (action.kind === "shellConfigure") {
@@ -105,7 +111,7 @@ export async function runScript(options: RunOptions): Promise<{
       data.set(step.line, values);
       continue; // Store/register/host/port are project settings, not secrets, so they are not redacted.
     }
-    if (action.kind === "login") {
+    if (action.kind === "login" || action.kind === "xstoreLogin") {
       if (!values.username || !values.password || Object.keys(values).length !== 2) {
         throw new Error(`Line ${step.line}: credential file must contain exactly username and password.`);
       }
@@ -118,7 +124,8 @@ export async function runScript(options: RunOptions): Promise<{
       }
     }
     data.set(step.line, values);
-    secretValues.push(...Object.values(values));
+    // The shared developer login ("xstoreLogin") is not secret; redacting a value like "1" would garble reports.
+    if (action.kind !== "xstoreLogin") secretValues.push(...Object.values(values));
   }
   const redact = (value: string) => secretValues.filter(Boolean).sort((a, b) => b.length - a.length)
     .reduce((text, secret) => text.split(secret).join("[REDACTED]"), value);
@@ -152,7 +159,7 @@ export async function runScript(options: RunOptions): Promise<{
         console.log(`[running] line ${result.line}: ${result.step}`);
         const stepStarted = performance.now();
         try {
-          result.status = await executeAction(page, step.action, options.config, data.get(step.line));
+          result.status = await executeAction(page, step.action, options.config, data.get(step.line), items.get(step.line));
           // Deliberate observation pause; counted in this step's durationMs and the run total.
           if (result.status === "passed" && options.config.stepDelayMs > 0) {
             result.executionMs = Math.round(performance.now() - stepStarted);

@@ -27,6 +27,24 @@ or start a sale. The configuration accepts the localhost HTTPS certificate for
 this run only; do not use it for an untrusted host. Use a test instance, never
 production.
 
+### Run the DIY Sale with Cash test
+
+Completes a no-account cash sale: signs in with the generic developer login in
+`config/xstore-login.json` if a login form is shown, starts a transaction,
+skips customer lookup, scans the sale IDs in `diy-sale/sale-items.json`, and
+tenders the exact amount due in cash. It passes when Xstore returns to Customer
+Lookup or the Main Menu.
+
+```sh
+npm start -- --script diy-sale/diy-sale-with-cash.xstore \
+  --config config/localhost-shell.json \
+  --slow-mo 400 \
+  --report-dir reports/live
+```
+
+This completes a real sale, so use a test instance only. If a previous run left
+a sale open, cancel it first.
+
 ## More Information
 
 See the [Technical Overview](docs/wiki/Technical-Overview.md) for framework

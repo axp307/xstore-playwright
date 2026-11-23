@@ -2,12 +2,13 @@ import { expect } from "playwright/test";
 import type { Page } from "playwright";
 import type { Configuration } from "./config.js";
 import { httpUrl } from "./config.js";
+import type { SaleItem } from "./config.js";
 import type { Action } from "./parser.js";
 
 // Converts displayed amount-due text into the string typed into the cash field.
 // Works on strings only (no floats) and rejects labels, negatives or ambiguous formats.
 export function exactCashAmount(text: string, format: Configuration["amountFormat"]): string {
-  let value = text.trim();
+  let value = text.trim().replace(/^Amount Due\s*/i, "");
   if (format.currencySymbol && value.startsWith(format.currencySymbol)) {
     value = value.slice(format.currencySymbol.length).trim();
   } else if (format.currencySymbol && value.endsWith(format.currencySymbol)) {
@@ -22,6 +23,9 @@ export function exactCashAmount(text: string, format: Configuration["amountForma
   const whole = match[1]!.split(format.groupSeparator || "\0").join("").replace(/^0+(?=\d)/, "");
   return `${whole}${format.decimalSeparator}${(match[2] ?? "").padEnd(2, "0")}`;
 }
+
+// Remembers the amount due noted at the Cash step so the tender step types exactly that value.
+const notedAmountDue = new WeakMap<Page, string>();
 
 // Drives the shell app's Location Details and Connection Details forms, then launches Xstore.
 // Throws unless Test Connection shows a Success dialog, so a bad host/port never reaches Launch.
@@ -50,9 +54,13 @@ export async function completeShellSetup(
 }
 
 // Performs one parsed step in the browser using the configured selectors.
+// DEVELOPER NOTE: the login (not xstoreLogin), startTransaction, startSale, addProducts and cashCheckout cases rely
+// on GUESSED selectors (see defaultSelectors in config.ts). Their button labels, field names and
+// cart/amount/completion markers are placeholders; verify them against a live Xstore before
+// trusting a failure or a pass from those steps.
 // Returns "skipped" only for the conditional setup step; any failure is thrown to the runner.
 export async function executeAction(
-  page: Page, action: Action, config: Configuration, data?: Record<string, string>
+  page: Page, action: Action, config: Configuration, data?: Record<string, string>, items?: SaleItem[]
 ): Promise<"passed" | "skipped"> {
   const s = config.selectors;
   const field = (selector: string) => page.locator(selector);
@@ -77,23 +85,48 @@ export async function executeAction(
     case "shellConfigure": {
       // Conditional: only the shell setup screen triggers the two-form configuration and launch.
       await field(s.shellConfigScreen).or(field(s.deviceErrorDialog)).or(field(s.loginReady))
+        .or(field(s.mainMenuLogOut)).or(field(s.customerLookupSkip))
         .filter({ visible: true }).first().waitFor();
       if (!await field(s.shellConfigScreen).isVisible()) return "skipped";
       await completeShellSetup(page, config, data!);
       break;
     }
     case "dismissDeviceError": {
-      await field(s.deviceErrorDialog).or(field(s.loginReady)).filter({ visible: true }).first().waitFor();
+      // A signed-in Xstore (Main Menu or Customer Lookup) has no dialog to dismiss; the strict login wait is separate.
+      await field(s.deviceErrorDialog).or(field(s.loginReady)).or(field(s.mainMenuLogOut)).or(field(s.customerLookupSkip))
+        .filter({ visible: true }).first().waitFor();
       if (!await field(s.deviceErrorDialog).isVisible()) return "skipped";
       await field(s.deviceErrorOk).click();
       await field(s.deviceErrorDialog).waitFor({ state: "hidden" });
       break;
     }
     case "expectLogin":
+      if (action.optional) {
+        // Already signed in (Main Menu or Customer Lookup): there is no login form to wait for.
+        await field(s.loginReady).or(field(s.mainMenuLogOut)).or(field(s.customerLookupSkip))
+          .filter({ visible: true }).first().waitFor();
+        if (!await field(s.loginReady).isVisible()) return "skipped";
+      }
       await field(s.loginReady).waitFor({ state: "visible" });
       await expect(field(s.deviceErrorDialog), "device error dialog still blocking")
         .toBeHidden({ timeout: config.timeoutMs });
       break;
+    case "xstoreLogin": {
+      if (action.optional) {
+        await field(s.loginReady).or(field(s.mainMenuLogOut)).or(field(s.customerLookupSkip))
+          .filter({ visible: true }).first().waitFor();
+        if (!await field(s.loginReady).isVisible()) return "skipped";
+      }
+      // Xstore shows Start Transaction before sign-on, so the cashier must be logged in first.
+      await field(s.loginReady).fill(data!.username!);
+      await field(s.loginReady).press("Enter");
+      const password = field(s.loginPasswordInput);
+      await password.waitFor({ state: "visible" });
+      await password.fill(data!.password!);
+      await password.press("Enter");
+      await field(s.mainMenuLogOut).waitFor({ state: "visible" });
+      break;
+    }
     case "login":
       await field(s.username).fill(data!.username!);
       await field(s.password).fill(data!.password!);
@@ -115,6 +148,52 @@ export async function executeAction(
         // Verify each scan has actually added an item before sending the next.
         await expect(field(s.cartItems)).toHaveCount(before + 1, { timeout: config.timeoutMs });
       }
+      break;
+    case "clickStartTransaction":
+      // A signed-in instance can already be on Customer Lookup, where there is nothing to click.
+      await field(s.startTransactionCard).or(field(s.customerLookupSkip)).filter({ visible: true }).first().waitFor();
+      if (await field(s.customerLookupSkip).isVisible()) return "skipped";
+      await field(s.startTransactionCard).click();
+      await field(s.customerLookupSkip).waitFor({ state: "visible" });
+      break;
+    case "skipCustomerLookup":
+      await field(s.customerLookupSkip).click();
+      await field(s.scanInput).waitFor({ state: "visible" });
+      break;
+    case "scanItems":
+      for (const item of items!) {
+        const before = await field(s.saleLines).count();
+        await field(s.scanInput).fill(item.saleId);
+        await field(s.scanInput).press("Enter");
+        // Wait for the cart to grow so the next scan (or Amount Due) never races the previous one.
+        await expect(field(s.saleLines), `sale ID ${item.saleId} was not added to the cart`)
+          .toHaveCount(before + 1, { timeout: config.timeoutMs });
+      }
+      break;
+    case "clickAmountDue":
+      await field(s.amountDueButton).click();
+      await field(s.cashTender).waitFor({ state: "visible" });
+      break;
+    case "selectCash": {
+      const text = await field(s.paymentAmountDue).innerText();
+      notedAmountDue.set(page, exactCashAmount(text, config.amountFormat));
+      await field(s.cashTender).click();
+      await field(s.tenderInput).waitFor({ state: "visible" });
+      break;
+    }
+    case "enterExactCash": {
+      const due = notedAmountDue.get(page);
+      if (!due) throw new Error("No amount due was noted; run the Cash step first.");
+      // The tender field is read-only (keypad-driven), so type through the keyboard.
+      await page.keyboard.type(due, { delay: 50 });
+      await expect(field(s.tenderInput), "tender field did not show the exact amount due")
+        .toHaveValue(due, { timeout: config.timeoutMs });
+      await page.keyboard.press("Enter");
+      break;
+    }
+    case "expectSaleComplete":
+      await field(s.tenderDialog).waitFor({ state: "hidden" });
+      await field(s.customerLookupSkip).or(field(s.mainMenuLogOut)).filter({ visible: true }).first().waitFor();
       break;
     case "cashCheckout":
       await field(s.checkout).click();

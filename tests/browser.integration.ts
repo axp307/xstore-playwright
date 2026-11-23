@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { chromium } from "playwright";
 import { loadConfiguration } from "../src/config.js";
@@ -381,4 +381,179 @@ test("an unreachable app fails the first step with a saved report", async t => {
   assert.equal(report.status, "failed");
   assert.match(report.steps[0]!.error!, /ERR_CONNECTION_REFUSED/);
   assert.equal(JSON.parse(await readFile(jsonPath, "utf8")).status, "failed");
+});
+
+interface DiyState {
+  username: string | undefined;
+  password: string | undefined;
+  scans: string[];
+  tender: string | undefined;
+  completed: boolean;
+}
+
+// Fake Xstore using the verified DIY-sale DOM shapes: focus-bar login + password dialog, Main Menu,
+// Customer Lookup, cart lines, Payment Options, and a read-only keyboard-driven tender field.
+// `entry` picks the starting screen; the amount due is fixed at $1,234.56 and only an exact tender completes.
+async function diyMock(options: { entry: "login" | "mainMenu" | "customerLookup"; rejectScan?: boolean }) {
+  const state: DiyState = { username: undefined, password: undefined, scans: [], tender: undefined, completed: false };
+  const server = createServer(async (request, response) => {
+    if (request.url === "/record" && request.method === "POST") {
+      let body = "";
+      for await (const chunk of request) body += String(chunk);
+      Object.assign(state, JSON.parse(body));
+      response.end("ok");
+      return;
+    }
+    response.writeHead(200, { "Content-Type": "text/html" });
+    response.end(`<!doctype html><html><body><main></main><script>
+      const main = document.querySelector("main");
+      const scans = [];
+      let username = "";
+      async function record(value) {
+        await fetch("/record", { method: "POST", body: JSON.stringify(value) });
+      }
+      function button(text, handler) {
+        const element = document.createElement("button");
+        element.textContent = text;
+        element.onclick = handler;
+        main.append(element);
+      }
+      function login() {
+        main.innerHTML = '<div id="focusBarInfoArea"><div>Log In</div><div id="focusBarInputField"><input></div></div>';
+        main.querySelector("input").onkeydown = event => {
+          if (event.key !== "Enter") return;
+          username = event.target.value;
+          main.insertAdjacentHTML("beforeend", '<div id="LOGIN_USER_PWD"><input type="password"></div>');
+          document.querySelector("#LOGIN_USER_PWD input").onkeydown = async keyEvent => {
+            if (keyEvent.key !== "Enter") return;
+            await record({ username, password: keyEvent.target.value });
+            mainMenu();
+          };
+        };
+      }
+      function mainMenu() {
+        main.innerHTML = '<div class="card">Start Transaction</div>';
+        button("Log Out", login);
+        main.querySelector(".card").onclick = customerLookup;
+      }
+      function customerLookup() {
+        main.innerHTML = "";
+        button("Skip", cart);
+      }
+      function cart() {
+        main.innerHTML = '<div id="focusBarInputField"><input></div><div class="xstore-sale-list-sizing"></div>';
+        main.querySelector("input").onkeydown = async event => {
+          if (event.key !== "Enter" || ${Boolean(options.rejectScan)}) return;
+          scans.push(event.target.value);
+          await record({ scans });
+          const line = document.createElement("div");
+          line.id = "listItem sli_1_" + scans.length;
+          main.querySelector(".xstore-sale-list-sizing").append(line);
+          event.target.value = "";
+        };
+        main.insertAdjacentHTML("beforeend", '<oj-button title="Amount Due $1,234.56"><button>Amount Due $1,234.56</button></oj-button>');
+        main.querySelector("oj-button button").onclick = payment;
+      }
+      function payment() {
+        main.innerHTML = '<div class="oj-typography-subheading-lg">Amount Due $1,234.56</div>'
+          + '<div class="xstore-tender-card-sizing"><div>Cash</div></div>';
+        main.querySelector(".xstore-tender-card-sizing").onclick = tender;
+      }
+      // The field is read-only, so digits only arrive through document key events (like the real keypad).
+      function tender() {
+        main.insertAdjacentHTML("beforeend", '<div id="ENTER_TENDER_AMOUNT"><input readonly></div>');
+        const input = document.querySelector("#ENTER_TENDER_AMOUNT input");
+        document.onkeydown = async event => {
+          if (/^[0-9.]$/.test(event.key)) input.value += event.key;
+          if (event.key !== "Enter") return;
+          await record({ tender: input.value });
+          if (input.value !== "1234.56") return;
+          await record({ completed: true });
+          document.onkeydown = null;
+          customerLookup();
+        };
+      }
+      ({ login, mainMenu, customerLookup })["${options.entry}"]();
+    </script></body></html>`);
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  return {
+    state, url: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise<void>((resolve, reject) =>
+      server.close(error => error ? reject(error) : resolve()))
+  };
+}
+
+// Writes the DIY script and its inputs into a temp directory, mirroring diy-sale/diy-sale-with-cash.xstore.
+async function diyScript(directory: string): Promise<string> {
+  const script = resolve(directory, "diy.xstore");
+  await writeFile(script, [
+    'Open app at "/"',
+    "Dismiss the device error prompt if shown",
+    "Wait for the Xstore login screen if shown",
+    'Log in at the Xstore login screen using "login.json" if shown',
+    'Click on "Start Transaction"',
+    "Skip customer lookup",
+    'Scan sale items from "items.json"',
+    'Click on "Amount Due"',
+    'Note the amount due and click on "Cash"',
+    "Enter the exact amount due and press Enter",
+    "Wait for the Customer Lookup or Main Menu screen"
+  ].join("\n"));
+  await writeFile(resolve(directory, "login.json"), JSON.stringify({ username: "100", password: "1" }));
+  await writeFile(resolve(directory, "items.json"), JSON.stringify({ items: [
+    { saleId: "650427503", quantity: 1 }, { saleId: "651234940", quantity: 1 }
+  ] }));
+  return script;
+}
+
+// Runs the DIY sale from each entry state: login screen, Main Menu and Customer Lookup (already signed in).
+// The optional login steps run only when a login form is shown; every entry state submits the exact noted amount.
+for (const entry of ["login", "mainMenu", "customerLookup"] as const) {
+  test(`DIY sale with cash completes from the ${entry} entry state`, async t => {
+    const directory = await workspace(t);
+    const app = await diyMock({ entry });
+    t.after(app.close);
+    const config = await loadConfiguration(undefined, app.url);
+    config.timeoutMs = 3000;
+    const { report } = await runScript({
+      script: await diyScript(directory), config, headless, slowMo, reportDir: directory
+    });
+    assert.equal(report.status, "passed", JSON.stringify(report));
+    const statuses = report.steps.map(step => step.status);
+    assert.deepEqual(statuses.slice(2, 5), [
+      entry === "login" ? "passed" : "skipped",
+      entry === "login" ? "passed" : "skipped",
+      entry === "customerLookup" ? "skipped" : "passed"
+    ]);
+    assert.ok(statuses.slice(5).every(status => status === "passed"));
+    assert.deepEqual(app.state.scans, ["650427503", "651234940"]);
+    assert.equal(app.state.tender, "1234.56");
+    assert.equal(app.state.completed, true);
+    if (entry === "login") {
+      assert.equal(app.state.username, "100");
+      assert.equal(app.state.password, "1");
+    } else {
+      assert.equal(app.state.username, undefined);
+    }
+  });
+}
+
+// A rejected scan must fail the scan step and stop the run before Amount Due, Cash or any tender.
+test("a rejected DIY scan fails the scan step and never tenders", async t => {
+  const directory = await workspace(t);
+  const app = await diyMock({ entry: "customerLookup", rejectScan: true });
+  t.after(app.close);
+  const config = await loadConfiguration(undefined, app.url);
+  config.timeoutMs = 500;
+  const { report } = await runScript({
+    script: await diyScript(directory), config, headless, slowMo, reportDir: directory
+  });
+  assert.equal(report.status, "failed");
+  assert.equal(report.steps[6]!.status, "failed");
+  assert.match(report.steps[6]!.error!, /650427503 was not added to the cart/);
+  assert.ok(report.steps.slice(7).every(step => step.status === "not-run"));
+  assert.equal(app.state.tender, undefined);
+  assert.equal(app.state.completed, false);
 });
