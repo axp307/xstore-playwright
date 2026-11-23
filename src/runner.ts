@@ -7,7 +7,17 @@ import { performance } from "node:perf_hooks";
 import { httpUrl, readJson, saleItems, strings } from "./config.js";
 import type { Configuration, SaleItem } from "./config.js";
 import { parseScript } from "./parser.js";
-import { executeAction } from "./xstore.js";
+import { executeAction, takeHumanDelaySec } from "./xstore.js";
+
+// Rounds seconds to at most 3 decimals (millisecond precision).
+export function roundSec(seconds: number): number {
+  return Math.round(seconds * 1000) / 1000;
+}
+
+// Seconds elapsed since a performance.now() timestamp, to 3 decimals.
+function elapsedSec(startedMs: number): number {
+  return roundSec((performance.now() - startedMs) / 1000);
+}
 
 export interface RunOptions {
   script: string;
@@ -19,15 +29,19 @@ export interface RunOptions {
 }
 
 export interface StepResult {
+  // 1-based position in the script's executable steps; `line` is the source line.
+  stepNumber: number;
   line: number;
   step: string;
   status: "not-run" | "planned" | "passed" | "skipped" | "failed";
-  // Elapsed step time = executionMs + observationDelayMs (always exactly their sum).
-  durationMs: number;
-  // Action time (includes any --slow-mo and failure screenshot); excludes the stepDelayMs pause.
-  executionMs: number;
+  // Elapsed step time = executionSec + humanDelaySec + observationDelaySec (always exactly their sum).
+  durationSec: number;
+  // Action time (includes any --slow-mo and failure screenshot); excludes both delays below.
+  executionSec: number;
+  // Measured humanDelayMs pauses before clicks/fills/key presses within the step (simulated reaction time).
+  humanDelaySec: number;
   // Measured elapsed stepDelayMs pause; 0 unless the step passed.
-  observationDelayMs: number;
+  observationDelaySec: number;
   error?: string;
   screenshot?: string | undefined;
 }
@@ -38,10 +52,11 @@ export interface RunReport {
   startedAt: string;
   finishedAt: string;
   // Wall-clock run time, including browser launch/close overhead.
-  durationMs: number;
-  // Sums over steps; their total is at most durationMs (the rest is lifecycle overhead).
-  stepExecutionMs: number;
-  stepObservationDelayMs: number;
+  durationSec: number;
+  // Sums over steps; their total is at most durationSec (the rest is lifecycle overhead).
+  stepExecutionSec: number;
+  stepHumanDelaySec: number;
+  stepObservationDelaySec: number;
   steps: StepResult[];
   // One entry per scanned item for "record scan times" steps.
   scanTimes: ScanTime[];
@@ -58,17 +73,17 @@ export function formatScanTime(scan: ScanTime): string {
 }
 
 // Formats the terminal completion line for a step from the same measured fields stored in the report.
-// Shows elapsed time as execution plus observation delay so console and report agree.
+// Shows elapsed time as execution plus human delay plus observation delay so console and report agree.
 export function formatStepLog(step: StepResult): string {
-  return `[${step.status}] line ${step.line} (elapsed ${step.durationMs} ms = execution ${step.executionMs} ms + observation delay ${step.observationDelayMs} ms)`;
+  return `[${step.status}] step ${step.stepNumber} (elapsed ${step.durationSec} s = execution ${step.executionSec} s + human delay ${step.humanDelaySec} s + observation delay ${step.observationDelaySec} s)`;
 }
 
 // Formats the CLI end-of-run summary: summed step time versus wall-clock total.
 // The difference is browser startup/cleanup and other overhead outside any step.
 export function formatRunSummary(report: RunReport): string {
-  const overhead = Math.max(0, report.durationMs - report.stepExecutionMs - report.stepObservationDelayMs);
-  return `Run ${report.status}; steps: execution ${report.stepExecutionMs} ms + observation delay ${report.stepObservationDelayMs} ms; `
-    + `wall-clock total ${report.durationMs} ms (includes ~${overhead} ms browser startup/cleanup and other overhead).`;
+  const overhead = roundSec(Math.max(0, report.durationSec - report.stepExecutionSec - report.stepHumanDelaySec - report.stepObservationDelaySec));
+  return `Run ${report.status}; steps: execution ${report.stepExecutionSec} s + human delay ${report.stepHumanDelaySec} s + observation delay ${report.stepObservationDelaySec} s; `
+    + `wall-clock total ${report.durationSec} s (includes ~${overhead} s browser startup/cleanup and other overhead).`;
 }
 
 // Masks editable and configured input fields before capturing failure evidence.
@@ -142,9 +157,9 @@ export async function runScript(options: RunOptions): Promise<{
     .reduce((text, secret) => text.split(secret).join("[REDACTED]"), value);
   const report: RunReport = {
     mode: options.dryRun ? "dry-run" : "browser", status: "passed",
-    startedAt: new Date().toISOString(), finishedAt: "", durationMs: 0, stepExecutionMs: 0, stepObservationDelayMs: 0,
+    startedAt: new Date().toISOString(), finishedAt: "", durationSec: 0, stepExecutionSec: 0, stepHumanDelaySec: 0, stepObservationDelaySec: 0,
     scanTimes: [],
-    steps: steps.map(step => ({ line: step.line, step: redact(step.text), status: "not-run", durationMs: 0, executionMs: 0, observationDelayMs: 0 }))
+    steps: steps.map((step, index) => ({ stepNumber: index + 1, line: step.line, step: redact(step.text), status: "not-run", durationSec: 0, executionSec: 0, humanDelaySec: 0, observationDelaySec: 0 }))
   };
   const directory = resolve(options.reportDir ?? "reports");
   await mkdir(directory, { recursive: true });
@@ -157,7 +172,7 @@ export async function runScript(options: RunOptions): Promise<{
     if (options.dryRun) {
       for (const result of report.steps) {
         result.status = "planned";
-        console.log(`[planned] line ${result.line}: ${result.step}`);
+        console.log(`[planned] step ${result.stepNumber}: ${result.step}`);
       }
     } else {
       browser = await chromium.launch({ headless: options.headless ?? false, slowMo: options.slowMo ?? 250 });
@@ -168,7 +183,7 @@ export async function runScript(options: RunOptions): Promise<{
       const page = await context.newPage();
       for (const [index, step] of steps.entries()) {
         const result = report.steps[index]!;
-        console.log(`[running] line ${result.line}: ${result.step}`);
+        console.log(`[running] step ${result.stepNumber}: ${result.step}`);
         const stepStarted = performance.now();
         try {
           result.status = await executeAction(page, step.action, options.config, data.get(step.line), items.get(step.line), (saleId, seconds) => {
@@ -176,15 +191,17 @@ export async function runScript(options: RunOptions): Promise<{
             report.scanTimes.push(scan);
             console.log(formatScanTime(scan));
           });
-          // Deliberate observation pause; counted in this step's durationMs and the run total.
+          result.humanDelaySec = takeHumanDelaySec(page);
+          // Deliberate observation pause; counted in this step's durationSec and the run total.
           if (result.status === "passed" && options.config.stepDelayMs > 0) {
-            result.executionMs = Math.round(performance.now() - stepStarted);
+            result.executionSec = roundSec(Math.max(0, elapsedSec(stepStarted) - result.humanDelaySec));
             const delayStarted = performance.now();
             await page.waitForTimeout(options.config.stepDelayMs);
-            result.observationDelayMs = Math.round(performance.now() - delayStarted);
+            result.observationDelaySec = elapsedSec(delayStarted);
           }
         } catch (error) {
           result.status = "failed";
+          result.humanDelaySec = takeHumanDelaySec(page);
           result.error = redact(error instanceof Error ? error.message : String(error));
           report.status = "failed";
           // Best-effort evidence of what the page showed; never masks the original failure.
@@ -192,8 +209,10 @@ export async function runScript(options: RunOptions): Promise<{
           result.screenshot = await saveFailureScreenshot(page, options.config, shot).then(() => shot, () => undefined);
         } finally {
           // Without a pause, execution is the whole step; otherwise it was captured before the pause.
-          if (result.observationDelayMs === 0) result.executionMs = Math.round(performance.now() - stepStarted);
-          result.durationMs = result.executionMs + result.observationDelayMs;
+          if (result.observationDelaySec === 0) {
+            result.executionSec = roundSec(Math.max(0, elapsedSec(stepStarted) - result.humanDelaySec));
+          }
+          result.durationSec = roundSec(result.executionSec + result.humanDelaySec + result.observationDelaySec);
           console.log(formatStepLog(result));
         }
         if (report.status === "failed") break;
@@ -210,17 +229,18 @@ export async function runScript(options: RunOptions): Promise<{
       report.error = redact(`Browser cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     report.finishedAt = new Date().toISOString();
-    report.durationMs = Math.round(performance.now() - started);
-    report.stepExecutionMs = report.steps.reduce((sum, step) => sum + step.executionMs, 0);
-    report.stepObservationDelayMs = report.steps.reduce((sum, step) => sum + step.observationDelayMs, 0);
+    report.durationSec = elapsedSec(started);
+    report.stepExecutionSec = roundSec(report.steps.reduce((sum, step) => sum + step.executionSec, 0));
+    report.stepHumanDelaySec = roundSec(report.steps.reduce((sum, step) => sum + step.humanDelaySec, 0));
+    report.stepObservationDelaySec = roundSec(report.steps.reduce((sum, step) => sum + step.observationDelaySec, 0));
     const lines = [
       `Run: ${report.status} (${report.mode})`,
       `Started: ${report.startedAt}`, `Finished: ${report.finishedAt}`,
-      `Total elapsed (wall-clock, incl. browser launch/close): ${report.durationMs} ms`,
-      `Steps: execution ${report.stepExecutionMs} ms + observation delay ${report.stepObservationDelayMs} ms = ${report.stepExecutionMs + report.stepObservationDelayMs} ms`,
-      "Execution includes Playwright --slow-mo; observation delay is the stepDelayMs pause after passed steps.",
+      `Total elapsed (wall-clock, incl. browser launch/close): ${report.durationSec} s`,
+      `Steps: execution ${report.stepExecutionSec} s + human delay ${report.stepHumanDelaySec} s + observation delay ${report.stepObservationDelaySec} s = ${roundSec(report.stepExecutionSec + report.stepHumanDelaySec + report.stepObservationDelaySec)} s`,
+      "Execution includes Playwright --slow-mo; human delay is the humanDelayMs pause before each click/fill/key press; observation delay is the stepDelayMs pause after passed steps.",
       ...report.steps.map(step =>
-        `${step.line}. [${step.status}] ${step.durationMs} ms (execution ${step.executionMs} ms + observation delay ${step.observationDelayMs} ms) - ${step.step}${step.error ? `\n   ${step.error}` : ""}${step.screenshot ? `\n   Screenshot: ${step.screenshot}` : ""}`),
+        `${step.stepNumber}. [${step.status}] ${step.durationSec} s (execution ${step.executionSec} s + human delay ${step.humanDelaySec} s + observation delay ${step.observationDelaySec} s) - ${step.step}${step.error ? `\n   ${step.error}` : ""}${step.screenshot ? `\n   Screenshot: ${step.screenshot}` : ""}`),
       ...report.scanTimes.map(formatScanTime),
       ...(report.error ? [`Run error: ${report.error}`] : [])
     ];

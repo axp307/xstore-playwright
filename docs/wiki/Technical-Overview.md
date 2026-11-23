@@ -72,7 +72,7 @@ flowchart LR
    Browser start/navigation/cleanup errors also yield a failed report.
 7. **Report**: `reports/run-<timestamp>-<id>.json` and `.txt` (git-ignored,
    mode `0600`) with status, start/finish, total ms, and per-step line, text,
-   status, duration, error. Durations use a monotonic clock. Each step records `durationMs` (elapsed) = `executionMs` (action time, includes `--slow-mo`) + `observationDelayMs` (measured `stepDelayMs` pause; 0 for dry-run/skipped/failed/not-run). The run records `stepExecutionMs` and `stepObservationDelayMs` sums; the terminal step lines and final summary print the same fields (elapsed = execution + observation delay; wall-clock total includes startup/cleanup overhead); total includes
+   status, duration, error. Durations use a monotonic clock and are reported in seconds with up to 3 decimals (config settings stay in milliseconds). Each step records `durationSec` (elapsed) = `executionSec` (action time, includes `--slow-mo`, excludes both delays) + `humanDelaySec` (measured `humanDelayMs` pauses before clicks/fills/key presses; 0 when disabled) + `observationDelaySec` (measured `stepDelayMs` pause; 0 for dry-run/skipped/failed/not-run). The run records `stepExecutionSec`, `stepHumanDelaySec` and `stepObservationDelaySec` sums; the terminal step lines and final summary print the same fields (elapsed = execution + human delay + observation delay; wall-clock total includes startup/cleanup overhead); total includes
    browser startup/cleanup.
 
 Statuses: `planned`, `passed`, `skipped` (conditional step not needed),
@@ -212,6 +212,7 @@ can still expose URLs, paths, UI text, and data outside masked fields; keep them
 | --- | --- | --- |
 | `baseUrl` | HTTP(S) origin; no embedded credentials | `http://localhost:8080` |
 | `timeoutMs` | Positive integer timeout for actions/navigation | `15000` |
+| `humanDelayMs` | Pause in ms before every human action (click, fill, key press) to simulate a person using the POS, randomized uniformly by ±25% per action; `0` disables. Applies per action, unlike `stepDelayMs` (per step) | `0` |
 | `stepDelayMs` | Observation pause in ms after each passed step (incl. the last); `0` disables. Counted in step/total timing; distinct from `--slow-mo` (per browser operation); not used for dry-run/skipped/failed steps | `0` |
 | `ignoreHttpsErrors` | Opt-in: accept a trusted self-signed HTTPS certificate for the run's context only | `false` |
 | `browserState` | Browser state per run. Only `"fresh"` (new isolated context) is supported; other values are rejected | `"fresh"` |

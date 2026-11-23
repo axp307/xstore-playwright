@@ -4,6 +4,7 @@
   "browserState": "fresh",
   "ignoreHttpsErrors": false,
   "stepDelayMs": 0,
+  "humanDelayMs": 400,
   "configurationFields": {
     "storeId": "input[name=\"storeId\"]",
     "registerId": "input[name=\"registerId\"]"

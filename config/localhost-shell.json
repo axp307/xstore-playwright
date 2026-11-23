@@ -3,5 +3,6 @@
   "timeoutMs": 30000,
   "browserState": "fresh",
   "ignoreHttpsErrors": true,
-  "stepDelayMs": 0
+  "stepDelayMs": 0,
+  "humanDelayMs": 400
 }

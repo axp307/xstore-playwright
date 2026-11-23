@@ -1,5 +1,5 @@
 import { expect } from "playwright/test";
-import type { Page } from "playwright";
+import type { Locator, Page } from "playwright";
 import { performance } from "node:perf_hooks";
 import type { Configuration } from "./config.js";
 import { httpUrl } from "./config.js";
@@ -43,6 +43,45 @@ export function scanCompleted(before: SaleLineSnapshot[], after: SaleLineSnapsho
   });
 }
 
+// Picks a delay uniformly within +/-25% of humanDelayMs; `random` is injectable for tests.
+export function jitteredDelay(humanDelayMs: number, random: () => number = Math.random): number {
+  return Math.round(humanDelayMs * (0.75 + random() * 0.5));
+}
+
+// Waits the configured "human delay" (with +/-25% jitter) before an action, simulating a person's reaction time.
+// The measured pause is accumulated per page so the runner can report it separately from action time.
+const humanDelayElapsed = new WeakMap<Page, number>();
+
+async function humanPause(page: Page, config: Configuration): Promise<void> {
+  if (config.humanDelayMs <= 0) return;
+  const started = performance.now();
+  await page.waitForTimeout(jitteredDelay(config.humanDelayMs));
+  humanDelayElapsed.set(page, (humanDelayElapsed.get(page) ?? 0) + performance.now() - started);
+}
+
+// Returns the human delay (seconds, 3 decimals) accumulated since the last call and resets it.
+export function takeHumanDelaySec(page: Page): number {
+  const elapsed = humanDelayElapsed.get(page) ?? 0;
+  humanDelayElapsed.delete(page);
+  return Math.round(elapsed) / 1000;
+}
+
+// Wraps a locator so click/fill/press are each preceded by the human delay.
+// Chained locators (or/filter/first) stay plain: they are only used for waiting and visibility checks.
+function humanize(page: Page, config: Configuration, locator: Locator): Locator {
+  const paced = new Set<string | symbol>(["click", "fill", "press"]);
+  return new Proxy(locator, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop, target);
+      if (!paced.has(prop) || typeof value !== "function") return value;
+      return async (...args: unknown[]) => {
+        await humanPause(page, config);
+        return value.apply(target, args);
+      };
+    }
+  });
+}
+
 // Remembers the amount due noted at the Cash step so the tender step types exactly that value.
 const notedAmountDue = new WeakMap<Page, string>();
 
@@ -52,24 +91,25 @@ export async function completeShellSetup(
   page: Page, config: Configuration, values: Record<string, string>
 ): Promise<void> {
   const s = config.selectors;
-  await page.locator(s.shellLocationDetails).click();
-  await page.locator(s.shellStore).fill(values.store!);
-  await page.locator(s.shellRegister).fill(values.register!);
-  await page.locator(s.shellSave).click();
-  await page.locator(s.shellConnectionDetails).click();
-  await page.locator(s.shellHost).fill(values.host!);
-  await page.locator(s.shellPort).fill(values.port!);
-  await page.locator(s.shellTestConnection).click();
+  const loc = (selector: string) => humanize(page, config, page.locator(selector));
+  await loc(s.shellLocationDetails).click();
+  await loc(s.shellStore).fill(values.store!);
+  await loc(s.shellRegister).fill(values.register!);
+  await loc(s.shellSave).click();
+  await loc(s.shellConnectionDetails).click();
+  await loc(s.shellHost).fill(values.host!);
+  await loc(s.shellPort).fill(values.port!);
+  await loc(s.shellTestConnection).click();
   const dialog = page.locator(s.shellDialog).first();
   await dialog.waitFor({ state: "visible" });
   if (!await page.locator(s.shellConnectionSuccess).isVisible()) {
     const message = (await dialog.innerText()).replace(/\s+/g, " ").trim();
     throw new Error(`Test Connection did not succeed: ${message}`);
   }
-  await page.locator(s.shellDialogOk).click();
+  await loc(s.shellDialogOk).click();
   await dialog.waitFor({ state: "hidden" });
-  await page.locator(s.shellSave).click();
-  await page.locator(s.shellLaunch).click();
+  await loc(s.shellSave).click();
+  await loc(s.shellLaunch).click();
 }
 
 // Performs one parsed step in the browser using the configured selectors.
@@ -83,7 +123,7 @@ export async function executeAction(
   onScanTime?: (saleId: string, seconds: number) => void
 ): Promise<"passed" | "skipped"> {
   const s = config.selectors;
-  const field = (selector: string) => page.locator(selector);
+  const field = (selector: string) => humanize(page, config, page.locator(selector));
   switch (action.kind) {
     case "open": {
       const response = await page.goto(httpUrl(action.target, config.baseUrl), { waitUntil: "domcontentloaded" });
@@ -196,8 +236,10 @@ export async function executeAction(
         const before = await snapshot();
         await field(s.scanInput).fill(item.saleId);
         // Timing starts once the sale ID is entered and ends when the cart shows the result.
+        // The human delay before Enter is taken first so it is not counted as scan time.
+        await humanPause(page, config);
         const scanStarted = performance.now();
-        await field(s.scanInput).press("Enter");
+        await page.locator(s.scanInput).press("Enter");
         // A new item grows the cart; a repeated item raises the quantity of its own existing line instead.
         // scanCompleted ignores unrelated updates, so a pending or rejected scan is not mistaken for done.
         await expect(async () => {
@@ -221,9 +263,11 @@ export async function executeAction(
       const due = notedAmountDue.get(page);
       if (!due) throw new Error("No amount due was noted; run the Cash step first.");
       // The tender field is read-only (keypad-driven), so type through the keyboard.
+      await humanPause(page, config);
       await page.keyboard.type(due, { delay: 50 });
       await expect(field(s.tenderInput), "tender field did not show the exact amount due")
         .toHaveValue(due, { timeout: config.timeoutMs });
+      await humanPause(page, config);
       await page.keyboard.press("Enter");
       break;
     }
