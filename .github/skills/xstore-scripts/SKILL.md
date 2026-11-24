@@ -73,7 +73,7 @@ Do all of these; skipping one is the usual cause of bugs.
    - Keep the unknown-step error unchanged.
 2. **`src/config.ts`** — add new selectors to `defaultSelectors`: VERIFIED block only once confirmed on the live UI, otherwise GUESSED with a comment. Prefer ids/roles over text; each selector must match exactly one visible element. Environments can override via `selectors` in the config JSON.
 3. **`src/xstore.ts`** — add a `case` in `executeAction`:
-   - Return `"skipped"` for conditional steps; otherwise `break` (passes); throw on failure.
+   - Return `"skipped"` only when a conditional step is not applicable. When it applies and succeeds, finish normally (`break`) so `executeAction` returns `"passed"`; throw on failure.
    - Wait for a concrete UI state (`waitFor`, `expect(...).toHaveCount`), not fixed delays.
    - Read-only keypad inputs need `page.keyboard.type`, not `fill()`.
    - Cross-step state (like the noted amount) lives in a `WeakMap<Page, ...>`.
