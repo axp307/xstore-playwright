@@ -143,11 +143,37 @@ for (const setup of [true, false]) {
     assert.equal(app.state.completed, true);
     assert.deepEqual(app.state.configuration, setup
       ? { storeId: "DEMO_STORE", registerId: "DEMO_REGISTER" } : undefined);
-    assert.ok(result.report.durationSec >= result.report.steps.reduce((total, step) => total + step.durationSec, 0) - 7);
+    assert.ok(result.report.durationSec >= result.report.steps.reduce((total, step) => total + step.durationSec, 0) - 0.007);
     const persisted = JSON.parse(await readFile(result.jsonPath, "utf8"));
     assert.deepEqual(persisted, result.report);
   });
 }
+
+// With a nonzero humanDelayMs every click/fill/press is paced; the pause is reported apart from execution
+// and the per-page accumulator resets between steps.
+test("human delay is paced per action and reported separately from execution", async t => {
+  const directory = await workspace(t);
+  const app = await mock({ setup: false });
+  t.after(app.close);
+  const config = await loadConfiguration(undefined, app.url);
+  config.timeoutMs = 3000;
+  config.humanDelayMs = 200;
+  const { report } = await runScript({ script: "examples/cash-sale.xstore", config, headless, slowMo, reportDir: directory });
+  assert.equal(report.status, "passed", JSON.stringify(report));
+  const paced = report.steps.filter(step => step.humanDelaySec > 0);
+  const unpaced = report.steps.filter(step => step.status === "passed" && step.humanDelaySec === 0);
+  assert.ok(paced.length >= 4, "steps with clicks/fills/presses must report a human delay");
+  // Each action waits 150-250 ms; a step's total must be a whole number of such pauses.
+  for (const step of paced) assert.ok(step.humanDelaySec >= 0.15 - 0.001, `step ${step.stepNumber} human delay ${step.humanDelaySec}`);
+  // Steps without human actions (e.g. open) report none, proving the accumulator resets between steps.
+  assert.ok(unpaced.length >= 1, "a step without human actions must not inherit earlier delay");
+  assert.equal(report.stepHumanDelaySec, roundSec(report.steps.reduce((sum, step) => sum + step.humanDelaySec, 0)));
+  for (const step of report.steps) {
+    assert.equal(step.durationSec, roundSec(step.executionSec + step.humanDelaySec + step.observationDelaySec));
+  }
+  // Human delay is excluded from execution, so a paced step's execution stays below the whole step.
+  for (const step of paced) assert.ok(step.executionSec < step.durationSec);
+});
 
 // Makes the mock ignore product adds to prove the scan step fails on the cart-count check.
 // Later steps must be not-run and no tender may be sent.

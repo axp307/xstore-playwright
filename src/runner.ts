@@ -209,7 +209,8 @@ export async function runScript(options: RunOptions): Promise<{
           }
         } catch (error) {
           result.status = "failed";
-          result.humanDelaySec = takeHumanDelaySec(page);
+          // Keep delay already drained after a successful action (e.g. page closed during the observation pause).
+          result.humanDelaySec = roundSec(result.humanDelaySec + takeHumanDelaySec(page));
           result.error = redact(error instanceof Error ? error.message : String(error));
           report.status = "failed";
           // Best-effort evidence of what the page showed; never masks the original failure.
