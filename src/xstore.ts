@@ -1,5 +1,6 @@
 import { expect } from "playwright/test";
 import type { Page } from "playwright";
+import { performance } from "node:perf_hooks";
 import type { Configuration } from "./config.js";
 import { httpUrl } from "./config.js";
 import type { SaleItem } from "./config.js";
@@ -22,6 +23,24 @@ export function exactCashAmount(text: string, format: Configuration["amountForma
   if (!match) throw new Error("Amount due is not a supported non-negative currency amount. Adjust amountDue/amountFormat.");
   const whole = match[1]!.split(format.groupSeparator || "\0").join("").replace(/^0+(?=\d)/, "");
   return `${whole}${format.decimalSeparator}${(match[2] ?? "").padEnd(2, "0")}`;
+}
+
+export interface SaleLineSnapshot { id: string; text: string; quantity?: number | undefined }
+
+// Decides whether a scan of `saleId` has been acknowledged by the cart. A line with a new DOM id counts.
+// Otherwise the same line (matched by id, so reordering is ignored) must show the sale ID as a whole token
+// (123 never matches 91234 or $123.00) and have changed, with a higher quantity when quantities are readable.
+export function scanCompleted(before: SaleLineSnapshot[], after: SaleLineSnapshot[], saleId: string): boolean {
+  const known = new Map(before.map(line => [line.id, line]));
+  if (after.some(line => !known.has(line.id))) return true;
+  const escaped = saleId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const token = new RegExp(`(?<![\\w.,$-])${escaped}(?!\\w|[.,]\\d)`);
+  return after.some(now => {
+    const old = known.get(now.id);
+    if (!old || !token.test(now.text)) return false;
+    if (old.quantity !== undefined && now.quantity !== undefined) return now.quantity > old.quantity;
+    return now.text !== old.text;
+  });
 }
 
 // Remembers the amount due noted at the Cash step so the tender step types exactly that value.
@@ -60,7 +79,8 @@ export async function completeShellSetup(
 // trusting a failure or a pass from those steps.
 // Returns "skipped" only for the conditional setup step; any failure is thrown to the runner.
 export async function executeAction(
-  page: Page, action: Action, config: Configuration, data?: Record<string, string>, items?: SaleItem[]
+  page: Page, action: Action, config: Configuration, data?: Record<string, string>, items?: SaleItem[],
+  onScanTime?: (saleId: string, seconds: number) => void
 ): Promise<"passed" | "skipped"> {
   const s = config.selectors;
   const field = (selector: string) => page.locator(selector);
@@ -162,12 +182,28 @@ export async function executeAction(
       break;
     case "scanItems":
       for (const item of items!) {
-        const before = await field(s.saleLines).count();
+        const lines = field(s.saleLines);
+        const snapshot = async (): Promise<SaleLineSnapshot[]> => {
+          const base = await lines.evaluateAll(elements => elements.map(element => ({ id: element.id, text: (element as HTMLElement).innerText })));
+          // Quantity uses a Playwright locator so any selector engine works; absent or non-numeric means unknown.
+          if (!s.saleLineQuantity) return base;
+          return Promise.all(base.map(async (line, i) => {
+            const cell = lines.nth(i).locator(s.saleLineQuantity).first();
+            const raw = await cell.count() ? await cell.innerText() : "";
+            return { ...line, quantity: /^\s*\d+\s*$/.test(raw) ? Number(raw) : undefined };
+          }));
+        };
+        const before = await snapshot();
         await field(s.scanInput).fill(item.saleId);
+        // Timing starts once the sale ID is entered and ends when the cart shows the result.
+        const scanStarted = performance.now();
         await field(s.scanInput).press("Enter");
-        // Wait for the cart to grow so the next scan (or Amount Due) never races the previous one.
-        await expect(field(s.saleLines), `sale ID ${item.saleId} was not added to the cart`)
-          .toHaveCount(before + 1, { timeout: config.timeoutMs });
+        // A new item grows the cart; a repeated item raises the quantity of its own existing line instead.
+        // scanCompleted ignores unrelated updates, so a pending or rejected scan is not mistaken for done.
+        await expect(async () => {
+          expect(scanCompleted(before, await snapshot(), item.saleId), `sale ID ${item.saleId} was not added to the cart`).toBe(true);
+        }).toPass({ timeout: config.timeoutMs });
+        if (action.recordScanTimes) onScanTime?.(item.saleId, (performance.now() - scanStarted) / 1000);
       }
       break;
     case "clickAmountDue":
