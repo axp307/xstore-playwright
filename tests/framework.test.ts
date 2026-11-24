@@ -100,7 +100,7 @@ test("console formatters show the measured execution/observation-delay breakdown
   assert.equal(formatStepLog(step), "[passed] line 5 (elapsed 1250 ms = execution 250 ms + observation delay 1000 ms)");
   const summary = formatRunSummary({
     mode: "browser", status: "passed", startedAt: "", finishedAt: "", durationMs: 2000,
-    stepExecutionMs: 500, stepObservationDelayMs: 1000, steps: [step]
+    stepExecutionMs: 500, stepObservationDelayMs: 1000, scanTimes: [], steps: [step]
   });
   assert.equal(summary, "Run passed; steps: execution 500 ms + observation delay 1000 ms; wall-clock total 2000 ms (includes ~500 ms browser startup/cleanup and other overhead).");
 });

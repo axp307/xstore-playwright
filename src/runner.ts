@@ -43,7 +43,18 @@ export interface RunReport {
   stepExecutionMs: number;
   stepObservationDelayMs: number;
   steps: StepResult[];
+  // One entry per scanned item for "record scan times" steps.
+  scanTimes: ScanTime[];
   error?: string;
+}
+
+export interface ScanTime {
+  saleId: string;
+  seconds: number;
+}
+
+export function formatScanTime(scan: ScanTime): string {
+  return `[scan-time] item ${scan.saleId} took ${scan.seconds.toFixed(3)} seconds to complete scanning`;
 }
 
 // Formats the terminal completion line for a step from the same measured fields stored in the report.
@@ -132,6 +143,7 @@ export async function runScript(options: RunOptions): Promise<{
   const report: RunReport = {
     mode: options.dryRun ? "dry-run" : "browser", status: "passed",
     startedAt: new Date().toISOString(), finishedAt: "", durationMs: 0, stepExecutionMs: 0, stepObservationDelayMs: 0,
+    scanTimes: [],
     steps: steps.map(step => ({ line: step.line, step: redact(step.text), status: "not-run", durationMs: 0, executionMs: 0, observationDelayMs: 0 }))
   };
   const directory = resolve(options.reportDir ?? "reports");
@@ -159,7 +171,11 @@ export async function runScript(options: RunOptions): Promise<{
         console.log(`[running] line ${result.line}: ${result.step}`);
         const stepStarted = performance.now();
         try {
-          result.status = await executeAction(page, step.action, options.config, data.get(step.line), items.get(step.line));
+          result.status = await executeAction(page, step.action, options.config, data.get(step.line), items.get(step.line), (saleId, seconds) => {
+            const scan = { saleId, seconds };
+            report.scanTimes.push(scan);
+            console.log(formatScanTime(scan));
+          });
           // Deliberate observation pause; counted in this step's durationMs and the run total.
           if (result.status === "passed" && options.config.stepDelayMs > 0) {
             result.executionMs = Math.round(performance.now() - stepStarted);
@@ -205,6 +221,7 @@ export async function runScript(options: RunOptions): Promise<{
       "Execution includes Playwright --slow-mo; observation delay is the stepDelayMs pause after passed steps.",
       ...report.steps.map(step =>
         `${step.line}. [${step.status}] ${step.durationMs} ms (execution ${step.executionMs} ms + observation delay ${step.observationDelayMs} ms) - ${step.step}${step.error ? `\n   ${step.error}` : ""}${step.screenshot ? `\n   Screenshot: ${step.screenshot}` : ""}`),
+      ...report.scanTimes.map(formatScanTime),
       ...(report.error ? [`Run error: ${report.error}`] : [])
     ];
     await writeFile(jsonPath, JSON.stringify(report, null, 2) + "\n", { mode: 0o600 });

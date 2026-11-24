@@ -12,7 +12,7 @@ export type Action =
   | { kind: "cashCheckout" }
   | { kind: "clickStartTransaction" }
   | { kind: "skipCustomerLookup" }
-  | { kind: "scanItems"; file: string }
+  | { kind: "scanItems"; file: string; recordScanTimes?: boolean }
   | { kind: "clickAmountDue" }
   | { kind: "selectCash" }
   | { kind: "enterExactCash" }
@@ -59,8 +59,8 @@ export function parseScript(source: string): Step[] {
       action = { kind: "clickStartTransaction" };
     } else if (/^Skip customer lookup$/i.test(text)) {
       action = { kind: "skipCustomerLookup" };
-    } else if ((match = text.match(/^Scan sale items from "([^"]+)"$/i))) {
-      action = { kind: "scanItems", file: match[1]! };
+    } else if ((match = text.match(/^Scan sale items from "([^"]+)"( and record scan times for each item)?$/i))) {
+      action = match[2] ? { kind: "scanItems", file: match[1]!, recordScanTimes: true } : { kind: "scanItems", file: match[1]! };
     } else if (/^Click on "Amount Due"$/i.test(text)) {
       action = { kind: "clickAmountDue" };
     } else if (/^Note the amount due and click on "Cash"$/i.test(text)) {

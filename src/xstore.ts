@@ -1,5 +1,6 @@
 import { expect } from "playwright/test";
 import type { Page } from "playwright";
+import { performance } from "node:perf_hooks";
 import type { Configuration } from "./config.js";
 import { httpUrl } from "./config.js";
 import type { SaleItem } from "./config.js";
@@ -60,7 +61,8 @@ export async function completeShellSetup(
 // trusting a failure or a pass from those steps.
 // Returns "skipped" only for the conditional setup step; any failure is thrown to the runner.
 export async function executeAction(
-  page: Page, action: Action, config: Configuration, data?: Record<string, string>, items?: SaleItem[]
+  page: Page, action: Action, config: Configuration, data?: Record<string, string>, items?: SaleItem[],
+  onScanTime?: (saleId: string, seconds: number) => void
 ): Promise<"passed" | "skipped"> {
   const s = config.selectors;
   const field = (selector: string) => page.locator(selector);
@@ -162,12 +164,21 @@ export async function executeAction(
       break;
     case "scanItems":
       for (const item of items!) {
-        const before = await field(s.saleLines).count();
+        const lines = field(s.saleLines);
+        const before = await lines.count();
+        const beforeText = await lines.allInnerTexts();
         await field(s.scanInput).fill(item.saleId);
+        // Timing starts once the sale ID is entered and ends when the cart shows the result.
+        const scanStarted = performance.now();
         await field(s.scanInput).press("Enter");
-        // Wait for the cart to grow so the next scan (or Amount Due) never races the previous one.
-        await expect(field(s.saleLines), `sale ID ${item.saleId} was not added to the cart`)
-          .toHaveCount(before + 1, { timeout: config.timeoutMs });
+        // A new item grows the cart; a repeated item changes an existing line's quantity instead.
+        // Waiting for either keeps the next scan (or Amount Due) from racing this one.
+        await expect(async () => {
+          const texts = await lines.allInnerTexts();
+          const changed = texts.length > before || texts.some((text, i) => i < beforeText.length && text !== beforeText[i]);
+          expect(changed, `sale ID ${item.saleId} was not added to the cart`).toBe(true);
+        }).toPass({ timeout: config.timeoutMs });
+        if (action.recordScanTimes) onScanTime?.(item.saleId, (performance.now() - scanStarted) / 1000);
       }
       break;
     case "clickAmountDue":

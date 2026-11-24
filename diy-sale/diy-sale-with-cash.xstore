@@ -10,7 +10,7 @@
 5. Log in at the Xstore login screen using "../config/xstore-login.json" if shown
 6. Click on "Start Transaction"
 7. Skip customer lookup
-8. Scan sale items from "sale-items.json"
+8. Scan sale items from "sale-items.json" and record scan times for each item
 9. Click on "Amount Due"
 10. Note the amount due and click on "Cash"
 11. Enter the exact amount due and press Enter
