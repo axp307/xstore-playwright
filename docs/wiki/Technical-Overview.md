@@ -149,7 +149,7 @@ their exact content.
 | `Log in at the Xstore login screen using "file"` | Types the user ID in the focus bar, Enter, types the password in the password dialog, Enter, waits for the Main Menu (Log Out button). Xstore shows Start Transaction before sign-on, so this must come before starting a sale. File: exactly `username` and `password`; not redacted in reports (shared developer login). |
 | `Click on "Start Transaction"` | Clicks the Main Menu Start Transaction card and waits for Customer Lookup |
 | `Skip customer lookup` | Clicks Skip and waits for the Shopping Cart scan field |
-| `Scan sale items from "file"` | Per item in the file: types the sale ID in the scan field, presses Enter, waits for the cart to gain a line or an existing line to change (e.g. quantity) |
+| `Scan sale items from "file"` | Per item in the file: types the sale ID in the scan field, presses Enter, waits for the cart to gain a line or for an existing line that contains the sale ID to change (e.g. quantity) |
 | `Scan sale items from "file" and record scan times for each item` | Same, and times each item from sale ID entry until the cart updates. Logs `[scan-time] item XXX took YYY seconds to complete scanning` to the console and text report; also stored in the JSON report as `scanTimes` |
 | `Click on "Amount Due"` | Clicks the Amount Due button and waits for the Payment Options |
 | `Note the amount due and click on "Cash"` | Records the Payment Options amount due, then clicks the Cash tender card |

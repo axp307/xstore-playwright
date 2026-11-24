@@ -171,11 +171,12 @@ export async function executeAction(
         // Timing starts once the sale ID is entered and ends when the cart shows the result.
         const scanStarted = performance.now();
         await field(s.scanInput).press("Enter");
-        // A new item grows the cart; a repeated item changes an existing line's quantity instead.
-        // Waiting for either keeps the next scan (or Amount Due) from racing this one.
+        // A new item grows the cart; a repeated item changes the quantity of its own existing line instead.
+        // Only a changed line that mentions this sale ID counts, so a pending or rejected scan is not
+        // mistaken for done by an unrelated price or promotion update on an earlier line.
         await expect(async () => {
           const texts = await lines.allInnerTexts();
-          const changed = texts.length > before || texts.some((text, i) => i < beforeText.length && text !== beforeText[i]);
+          const changed = texts.length > before || texts.some((text, i) => i < beforeText.length && text !== beforeText[i] && text.includes(item.saleId));
           expect(changed, `sale ID ${item.saleId} was not added to the cart`).toBe(true);
         }).toPass({ timeout: config.timeoutMs });
         if (action.recordScanTimes) onScanTime?.(item.saleId, (performance.now() - scanStarted) / 1000);

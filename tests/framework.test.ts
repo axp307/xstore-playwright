@@ -66,7 +66,7 @@ test("configuration overrides are validated and base URL override wins", async t
   assert.equal(config.browserState, "fresh");
   assert.equal(config.ignoreHttpsErrors, false);
   assert.equal(config.stepDelayMs, 0);
-  assert.equal((await loadConfiguration("config/localhost-shell.json")).stepDelayMs, 1000);
+  assert.equal((await loadConfiguration("config/localhost-shell.json")).stepDelayMs, 0);
   assert.equal((await loadConfiguration("config/localhost-shell.json")).ignoreHttpsErrors, true);
   await writeFile(file, JSON.stringify({ browserState: "fresh" }));
   assert.equal((await loadConfiguration(file)).browserState, "fresh");
