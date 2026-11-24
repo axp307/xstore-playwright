@@ -50,3 +50,9 @@ a sale open, cancel it first.
 See the [Technical Overview](docs/wiki/Technical-Overview.md) for framework
 architecture, script syntax, configuration, reports, testing, and extension
 details.
+
+## IMPORTANT Note about tokens
+
+If this test is run on a system, it may invalidate existing session tokens from other users, so there may be some "Access Not Allowed" messages observed after running this tool.
+
+To fix this, go to the database > CTL_CHEETAH_DEVICE_ACCESS and set the field STATUS to ENABLED for the relevant token.
