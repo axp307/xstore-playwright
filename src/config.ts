@@ -48,9 +48,10 @@ export const defaultSelectors = {
   scanInput: '#focusBarInputField input',
   // One element per sale line ("listItem sli_<txn>_<line>"); the list's empty-state row does not match.
   saleLines: '.xstore-sale-list-sizing [id^="listItem sli_"]',
-  // Optional element inside a sale line showing its quantity. When set, a repeated scan only completes
-  // once that quantity increases; empty means fall back to a text change on the line with the sale ID.
-  saleLineQuantity: "",
+  // Quantity cell inside a sale line (row2, 5th column; found by tools/discover-quantity-dom.ts on Xstore 24.0).
+  // When set, a repeated scan only completes once the quantity increases; empty falls back to a text change
+  // on the line showing the sale ID.
+  saleLineQuantity: "#row2 > div:nth-child(5)",
   // The button title reads "Amount Due $<total>", so the total is parsed from its text.
   amountDueButton: 'oj-button[title^="Amount Due"]',
   // On the Payment Options screen the total is plain text (the button above is gone).
