@@ -222,30 +222,32 @@ export async function executeAction(
       break;
     case "scanItems":
       for (const item of items!) {
-        const lines = field(s.saleLines);
-        const snapshot = async (): Promise<SaleLineSnapshot[]> => {
-          const base = await lines.evaluateAll(elements => elements.map(element => ({ id: element.id, text: (element as HTMLElement).innerText })));
-          // Quantity uses a Playwright locator so any selector engine works; absent or non-numeric means unknown.
-          if (!s.saleLineQuantity) return base;
-          return Promise.all(base.map(async (line, i) => {
-            const cell = lines.nth(i).locator(s.saleLineQuantity).first();
-            const raw = await cell.count() ? await cell.innerText() : "";
-            return { ...line, quantity: /^\s*\d+\s*$/.test(raw) ? Number(raw) : undefined };
-          }));
-        };
-        const before = await snapshot();
-        await field(s.scanInput).fill(item.saleId);
-        // Timing starts once the sale ID is entered and ends when the cart shows the result.
-        // The human delay before Enter is taken first so it is not counted as scan time.
-        await humanPause(page, config);
-        const scanStarted = performance.now();
-        await page.locator(s.scanInput).press("Enter");
-        // A new item grows the cart; a repeated item raises the quantity of its own existing line instead.
-        // scanCompleted ignores unrelated updates, so a pending or rejected scan is not mistaken for done.
-        await expect(async () => {
-          expect(scanCompleted(before, await snapshot(), item.saleId), `sale ID ${item.saleId} was not added to the cart`).toBe(true);
-        }).toPass({ timeout: config.timeoutMs });
-        if (action.recordScanTimes) onScanTime?.(item.saleId, (performance.now() - scanStarted) / 1000);
+        for (let copy = 1; copy <= item.quantity; copy++) {
+          const lines = field(s.saleLines);
+          const snapshot = async (): Promise<SaleLineSnapshot[]> => {
+            const base = await lines.evaluateAll(elements => elements.map(element => ({ id: element.id, text: (element as HTMLElement).innerText })));
+            // Quantity uses a Playwright locator so any selector engine works; absent or non-numeric means unknown.
+            if (!s.saleLineQuantity) return base;
+            return Promise.all(base.map(async (line, i) => {
+              const cell = lines.nth(i).locator(s.saleLineQuantity).first();
+              const raw = await cell.count() ? await cell.innerText() : "";
+              return { ...line, quantity: /^\s*\d+\s*$/.test(raw) ? Number(raw) : undefined };
+            }));
+          };
+          const before = await snapshot();
+          await field(s.scanInput).fill(item.saleId);
+          // Timing starts once the sale ID is entered and ends when the cart shows the result.
+          // The human delay before Enter is taken first so it is not counted as scan time.
+          await humanPause(page, config);
+          const scanStarted = performance.now();
+          await page.locator(s.scanInput).press("Enter");
+          // A new item grows the cart; a repeated item raises the quantity of its own existing line instead.
+          // scanCompleted ignores unrelated updates, so a pending or rejected scan is not mistaken for done.
+          await expect(async () => {
+            expect(scanCompleted(before, await snapshot(), item.saleId), `sale ID ${item.saleId} was not added to the cart`).toBe(true);
+          }).toPass({ timeout: config.timeoutMs });
+          if (action.recordScanTimes) onScanTime?.(item.saleId, (performance.now() - scanStarted) / 1000);
+        }
       }
       break;
     case "clickAmountDue":
