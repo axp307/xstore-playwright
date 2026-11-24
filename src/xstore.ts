@@ -25,6 +25,23 @@ export function exactCashAmount(text: string, format: Configuration["amountForma
   return `${whole}${format.decimalSeparator}${(match[2] ?? "").padEnd(2, "0")}`;
 }
 
+export interface SaleLineSnapshot { text: string; quantity?: number | undefined }
+
+// Decides whether a scan of `saleId` has been acknowledged by the cart. A new line counts. Otherwise the
+// sale ID must appear as a whole token (so 123 never matches 91234 or $123.00) on a line that changed,
+// and, when quantities are readable, that line's quantity must have increased.
+export function scanCompleted(before: SaleLineSnapshot[], after: SaleLineSnapshot[], saleId: string): boolean {
+  if (after.length > before.length) return true;
+  const escaped = saleId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const token = new RegExp(`(?<![\\w.,$-])${escaped}(?!\\w|[.,]\\d)`);
+  return before.some((old, i) => {
+    const now = after[i];
+    if (!now || !token.test(now.text)) return false;
+    if (old.quantity !== undefined && now.quantity !== undefined) return now.quantity > old.quantity;
+    return now.text !== old.text;
+  });
+}
+
 // Remembers the amount due noted at the Cash step so the tender step types exactly that value.
 const notedAmountDue = new WeakMap<Page, string>();
 
@@ -165,19 +182,20 @@ export async function executeAction(
     case "scanItems":
       for (const item of items!) {
         const lines = field(s.saleLines);
-        const before = await lines.count();
-        const beforeText = await lines.allInnerTexts();
+        const snapshot = () => lines.evaluateAll((elements, quantitySelector) => elements.map(element => {
+          const raw = quantitySelector ? element.querySelector(quantitySelector)?.textContent ?? "" : "";
+          const quantity = /^\s*\d+\s*$/.test(raw) ? Number(raw) : undefined;
+          return { text: (element as HTMLElement).innerText, quantity };
+        }), s.saleLineQuantity);
+        const before = await snapshot();
         await field(s.scanInput).fill(item.saleId);
         // Timing starts once the sale ID is entered and ends when the cart shows the result.
         const scanStarted = performance.now();
         await field(s.scanInput).press("Enter");
-        // A new item grows the cart; a repeated item changes the quantity of its own existing line instead.
-        // Only a changed line that mentions this sale ID counts, so a pending or rejected scan is not
-        // mistaken for done by an unrelated price or promotion update on an earlier line.
+        // A new item grows the cart; a repeated item raises the quantity of its own existing line instead.
+        // scanCompleted ignores unrelated updates, so a pending or rejected scan is not mistaken for done.
         await expect(async () => {
-          const texts = await lines.allInnerTexts();
-          const changed = texts.length > before || texts.some((text, i) => i < beforeText.length && text !== beforeText[i] && text.includes(item.saleId));
-          expect(changed, `sale ID ${item.saleId} was not added to the cart`).toBe(true);
+          expect(scanCompleted(before, await snapshot(), item.saleId), `sale ID ${item.saleId} was not added to the cart`).toBe(true);
         }).toPass({ timeout: config.timeoutMs });
         if (action.recordScanTimes) onScanTime?.(item.saleId, (performance.now() - scanStarted) / 1000);
       }

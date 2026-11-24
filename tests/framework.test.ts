@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseScript } from "../src/parser.js";
-import { exactCashAmount } from "../src/xstore.js";
+import { exactCashAmount, scanCompleted } from "../src/xstore.js";
 import { httpUrl, loadConfiguration, readJson } from "../src/config.js";
 import { formatRunSummary, formatStepLog, runScript } from "../src/runner.js";
 import { workspace } from "./helpers.js";
@@ -232,4 +232,20 @@ test("login steps accept an optional 'if shown' suffix", () => {
   assert.deepEqual(steps.slice(1).map(step => step.action), [
     { kind: "expectLogin", optional: true }, { kind: "xstoreLogin", file: "l.json", optional: true }, { kind: "expectLogin" }
   ]);
+});
+
+// Guards scan completion against unrelated cart updates, overlapping IDs and rejected repeats.
+test("scanCompleted requires a new line or a change on the line with the exact sale ID", () => {
+  const line = (text: string, quantity?: number) => ({ text, quantity });
+  const cart = [line("91234 Paint $10.00 qty 1", 1), line("555 Brush $5.00 qty 1", 1)];
+  assert.equal(scanCompleted(cart, [...cart, line("123 Tape")], "123"), true);
+  // Pending/rejected scan of 123 while an unrelated line (91234) changes price.
+  assert.equal(scanCompleted(cart, [line("91234 Paint $9.00 qty 1", 1), cart[1]!], "123"), false);
+  assert.equal(scanCompleted(cart, [line("91234 Paint $123.00 qty 1", 1), cart[1]!], "123"), false);
+  // Repeat scan: quantity increment passes, a price-only change on its own line does not.
+  assert.equal(scanCompleted(cart, [line("91234 Paint $20.00 qty 2", 2), cart[1]!], "91234"), true);
+  assert.equal(scanCompleted(cart, [line("91234 Paint $9.00 qty 1", 1), cart[1]!], "91234"), false);
+  // Without readable quantities, a text change on the matching line is accepted.
+  assert.equal(scanCompleted([line("555 Brush qty 1")], [line("555 Brush qty 2")], "555"), true);
+  assert.equal(scanCompleted([line("555 Brush qty 1")], [line("555 Brush qty 1")], "555"), false);
 });
