@@ -25,18 +25,19 @@ export function exactCashAmount(text: string, format: Configuration["amountForma
   return `${whole}${format.decimalSeparator}${(match[2] ?? "").padEnd(2, "0")}`;
 }
 
-export interface SaleLineSnapshot { text: string; quantity?: number | undefined }
+export interface SaleLineSnapshot { id: string; text: string; quantity?: number | undefined }
 
-// Decides whether a scan of `saleId` has been acknowledged by the cart. A new line counts. Otherwise the
-// sale ID must appear as a whole token (so 123 never matches 91234 or $123.00) on a line that changed,
-// and, when quantities are readable, that line's quantity must have increased.
+// Decides whether a scan of `saleId` has been acknowledged by the cart. A line with a new DOM id counts.
+// Otherwise the same line (matched by id, so reordering is ignored) must show the sale ID as a whole token
+// (123 never matches 91234 or $123.00) and have changed, with a higher quantity when quantities are readable.
 export function scanCompleted(before: SaleLineSnapshot[], after: SaleLineSnapshot[], saleId: string): boolean {
-  if (after.length > before.length) return true;
+  const known = new Map(before.map(line => [line.id, line]));
+  if (after.some(line => !known.has(line.id))) return true;
   const escaped = saleId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const token = new RegExp(`(?<![\\w.,$-])${escaped}(?!\\w|[.,]\\d)`);
-  return before.some((old, i) => {
-    const now = after[i];
-    if (!now || !token.test(now.text)) return false;
+  return after.some(now => {
+    const old = known.get(now.id);
+    if (!old || !token.test(now.text)) return false;
     if (old.quantity !== undefined && now.quantity !== undefined) return now.quantity > old.quantity;
     return now.text !== old.text;
   });
@@ -182,11 +183,16 @@ export async function executeAction(
     case "scanItems":
       for (const item of items!) {
         const lines = field(s.saleLines);
-        const snapshot = () => lines.evaluateAll((elements, quantitySelector) => elements.map(element => {
-          const raw = quantitySelector ? element.querySelector(quantitySelector)?.textContent ?? "" : "";
-          const quantity = /^\s*\d+\s*$/.test(raw) ? Number(raw) : undefined;
-          return { text: (element as HTMLElement).innerText, quantity };
-        }), s.saleLineQuantity);
+        const snapshot = async (): Promise<SaleLineSnapshot[]> => {
+          const base = await lines.evaluateAll(elements => elements.map(element => ({ id: element.id, text: (element as HTMLElement).innerText })));
+          // Quantity uses a Playwright locator so any selector engine works; absent or non-numeric means unknown.
+          if (!s.saleLineQuantity) return base;
+          return Promise.all(base.map(async (line, i) => {
+            const cell = lines.nth(i).locator(s.saleLineQuantity).first();
+            const raw = await cell.count() ? await cell.innerText() : "";
+            return { ...line, quantity: /^\s*\d+\s*$/.test(raw) ? Number(raw) : undefined };
+          }));
+        };
         const before = await snapshot();
         await field(s.scanInput).fill(item.saleId);
         // Timing starts once the sale ID is entered and ends when the cart shows the result.

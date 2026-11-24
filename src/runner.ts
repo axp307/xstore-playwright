@@ -172,7 +172,7 @@ export async function runScript(options: RunOptions): Promise<{
         const stepStarted = performance.now();
         try {
           result.status = await executeAction(page, step.action, options.config, data.get(step.line), items.get(step.line), (saleId, seconds) => {
-            const scan = { saleId, seconds };
+            const scan = { saleId: redact(saleId), seconds };
             report.scanTimes.push(scan);
             console.log(formatScanTime(scan));
           });
