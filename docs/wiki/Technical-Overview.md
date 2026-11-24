@@ -168,7 +168,9 @@ npm start -- --script diy-sale/diy-sale-with-cash.xstore \
 
 Items come from `diy-sale/sale-items.json`:
 `{"items": [{"saleId": "650427503", "quantity": 1}, ...]}`. `quantity` is
-validated but not yet applied; Xstore's default quantity is used. Xstore keeps
+applied by scanning the sale ID once per unit (Xstore treats repeats as a
+quantity change); with `record scan times`, each scan gets its own timing
+entry. Xstore keeps
 transaction state server-side, so a failed run can leave a sale open or the
 cashier signed in; cancel the sale and log out before rerunning (step 4 expects
 the login screen). Login uses the generic developer login in

@@ -472,9 +472,18 @@ async function diyMock(options: { entry: "login" | "mainMenu" | "customerLookup"
           if (event.key !== "Enter" || ${Boolean(options.rejectScan)}) return;
           scans.push(event.target.value);
           await record({ scans });
-          const line = document.createElement("div");
-          line.id = "listItem sli_1_" + scans.length;
-          main.querySelector(".xstore-sale-list-sizing").append(line);
+          const list = main.querySelector(".xstore-sale-list-sizing");
+          const existing = [...list.children].find(child => child.dataset.saleId === event.target.value);
+          if (existing) {
+            const cell = existing.querySelector("#row2 > div:nth-child(5)");
+            cell.textContent = String(Number(cell.textContent) + 1);
+          } else {
+            const line = document.createElement("div");
+            line.id = "listItem sli_1_" + scans.length;
+            line.dataset.saleId = event.target.value;
+            line.innerHTML = '<div id="row2"><div>' + event.target.value + '</div><div></div><div></div><div></div><div>1</div></div>';
+            list.append(line);
+          }
           event.target.value = "";
         };
         main.insertAdjacentHTML("beforeend", '<oj-button title="Amount Due $1,234.56"><button>Amount Due $1,234.56</button></oj-button>');
@@ -512,7 +521,11 @@ async function diyMock(options: { entry: "login" | "mainMenu" | "customerLookup"
 }
 
 // Writes the DIY script and its inputs into a temp directory, mirroring diy-sale/diy-sale-with-cash.xstore.
-async function diyScript(directory: string): Promise<string> {
+async function diyScript(
+  directory: string,
+  items = [{ saleId: "650427503", quantity: 1 }, { saleId: "651234940", quantity: 1 }],
+  recordScanTimes = false
+): Promise<string> {
   const script = resolve(directory, "diy.xstore");
   await writeFile(script, [
     'Open app at "/"',
@@ -521,16 +534,14 @@ async function diyScript(directory: string): Promise<string> {
     'Log in at the Xstore login screen using "login.json" if shown',
     'Click on "Start Transaction"',
     "Skip customer lookup",
-    'Scan sale items from "items.json"',
+    `Scan sale items from "items.json"${recordScanTimes ? " and record scan times for each item" : ""}`,
     'Click on "Amount Due"',
     'Note the amount due and click on "Cash"',
     "Enter the exact amount due and press Enter",
     "Wait for the Customer Lookup or Main Menu screen"
   ].join("\n"));
   await writeFile(resolve(directory, "login.json"), JSON.stringify({ username: "100", password: "1" }));
-  await writeFile(resolve(directory, "items.json"), JSON.stringify({ items: [
-    { saleId: "650427503", quantity: 1 }, { saleId: "651234940", quantity: 1 }
-  ] }));
+  await writeFile(resolve(directory, "items.json"), JSON.stringify({ items }));
   return script;
 }
 
@@ -582,4 +593,22 @@ test("a rejected DIY scan fails the scan step and never tenders", async t => {
   assert.ok(report.steps.slice(7).every(step => step.status === "not-run"));
   assert.equal(app.state.tender, undefined);
   assert.equal(app.state.completed, false);
+});
+
+// quantity > 1 means one scan per unit; repeats raise the existing line's quantity instead of adding lines.
+test("DIY sale scans an item once per quantity and records a time for every scan", async t => {
+  const directory = await workspace(t);
+  const app = await diyMock({ entry: "customerLookup" });
+  t.after(app.close);
+  const config = await loadConfiguration(undefined, app.url);
+  config.timeoutMs = 3000;
+  const script = await diyScript(directory, [
+    { saleId: "650427503", quantity: 3 }, { saleId: "651234940", quantity: 2 }
+  ], true);
+  const { report } = await runScript({ script, config, headless, slowMo, reportDir: directory });
+  assert.equal(report.status, "passed", JSON.stringify(report));
+  assert.deepEqual(app.state.scans, [
+    "650427503", "650427503", "650427503", "651234940", "651234940"
+  ]);
+  assert.deepEqual(report.scanTimes.map(scan => scan.saleId), app.state.scans);
 });
