@@ -149,7 +149,7 @@ their exact content.
 | `Log in at the Xstore login screen using "file"` | Types the user ID in the focus bar, Enter, types the password in the password dialog, Enter, waits for the Main Menu (Log Out button). Xstore shows Start Transaction before sign-on, so this must come before starting a sale. File: exactly `username` and `password`; not redacted in reports (shared developer login). |
 | `Click on "Start Transaction"` | Clicks the Main Menu Start Transaction card and waits for Customer Lookup |
 | `Skip customer lookup` | Clicks Skip and waits for the Shopping Cart scan field |
-| `Scan sale items from "file"` | Per item in the file: types the sale ID in the scan field, presses Enter, waits for the cart to gain a line or for the existing line showing that exact sale ID (whole token, so `123` never matches `91234`) to change. The `saleLineQuantity` selector (Playwright syntax resolved inside the line; default `#row2 > div:nth-child(5)`, verified on Xstore 24.0) must show a higher quantity; if it is empty or unreadable, any text change on that line counts |
+| `Scan sale items from "file"` | Per item in the file, repeated `quantity` times (each unit is a separate scan; Xstore treats repeats as a quantity change): types the sale ID in the scan field, presses Enter, waits for the cart to gain a line or for the existing line showing that exact sale ID (whole token, so `123` never matches `91234`) to change. The `saleLineQuantity` selector (Playwright syntax resolved inside the line; default `#row2 > div:nth-child(5)`, verified on Xstore 24.0) must show a higher quantity; if it is empty or unreadable, any text change on that line counts |
 | `Scan sale items from "file" and record scan times for each item` | Same, and times each item from sale ID entry until the cart updates. Logs `[scan-time] item XXX took YYY seconds to complete scanning` to the console and text report; also stored in the JSON report as `scanTimes` |
 | `Click on "Amount Due"` | Clicks the Amount Due button and waits for the Payment Options |
 | `Note the amount due and click on "Cash"` | Records the Payment Options amount due, then clicks the Cash tender card |
@@ -168,7 +168,9 @@ npm start -- --script diy-sale/diy-sale-with-cash.xstore \
 
 Items come from `diy-sale/sale-items.json`:
 `{"items": [{"saleId": "650427503", "quantity": 1}, ...]}`. `quantity` is
-validated but not yet applied; Xstore's default quantity is used. Xstore keeps
+applied by scanning the sale ID once per unit (Xstore treats repeats as a
+quantity change); with `record scan times`, each scan gets its own timing
+entry. Xstore keeps
 transaction state server-side, so a failed run can leave a sale open or the
 cashier signed in; cancel the sale and log out before rerunning (step 4 expects
 the login screen). Login uses the generic developer login in
