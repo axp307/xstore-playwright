@@ -92,6 +92,8 @@ export interface Configuration {
   stepDelayMs: number;
   // Pause before every human-like action (click, fill, key press) to mimic a person at the register.
   humanDelayMs: number;
+  // Display only: true shows times in seconds in logs/text report; false shows milliseconds. JSON report stays in seconds.
+  timesInSeconds: boolean;
   selectors: typeof defaultSelectors;
   configurationFields: Record<string, string>;
   amountFormat: { decimalSeparator: string; groupSeparator: string; currencySymbol: string };
@@ -176,7 +178,7 @@ export function httpUrl(target: string, base?: string): string {
 // Merges selector overrides over defaultSelectors and rejects unknown keys or bad formats.
 export async function loadConfiguration(file?: string, baseUrl?: string): Promise<Configuration> {
   const raw = file ? object(await readJson(file), "Configuration") : {};
-  const allowed = ["baseUrl", "timeoutMs", "selectors", "configurationFields", "amountFormat", "browserState", "ignoreHttpsErrors", "stepDelayMs", "humanDelayMs"];
+  const allowed = ["baseUrl", "timeoutMs", "selectors", "configurationFields", "amountFormat", "browserState", "ignoreHttpsErrors", "stepDelayMs", "humanDelayMs", "timesInSeconds"];
   for (const key of Object.keys(raw)) {
     if (!allowed.includes(key)) throw new Error(`Unknown configuration key: ${key}`);
   }
@@ -189,6 +191,10 @@ export async function loadConfiguration(file?: string, baseUrl?: string): Promis
   const stepDelayMs = raw.stepDelayMs === undefined ? 0 : raw.stepDelayMs;
   if (typeof stepDelayMs !== "number" || !Number.isSafeInteger(stepDelayMs) || stepDelayMs < 0) {
     throw new Error("stepDelayMs must be a non-negative safe integer (milliseconds).");
+  }
+  const timesInSeconds = raw.timesInSeconds === undefined ? true : raw.timesInSeconds;
+  if (typeof timesInSeconds !== "boolean") {
+    throw new Error("timesInSeconds must be a boolean.");
   }
   const humanDelayMs = raw.humanDelayMs === undefined ? 0 : raw.humanDelayMs;
   if (typeof humanDelayMs !== "number" || !Number.isSafeInteger(humanDelayMs) || humanDelayMs < 0) {
@@ -229,6 +235,7 @@ export async function loadConfiguration(file?: string, baseUrl?: string): Promis
     ignoreHttpsErrors,
     stepDelayMs,
     humanDelayMs,
+    timesInSeconds,
     selectors: { ...defaultSelectors, ...overrides },
     configurationFields: fields,
     amountFormat: format

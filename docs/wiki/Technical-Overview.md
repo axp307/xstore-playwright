@@ -213,6 +213,7 @@ can still expose URLs, paths, UI text, and data outside masked fields; keep them
 | `baseUrl` | HTTP(S) origin; no embedded credentials | `http://localhost:8080` |
 | `timeoutMs` | Positive integer timeout for actions/navigation | `15000` |
 | `humanDelayMs` | Pause in ms before every human action (click, fill, key press) to simulate a person using the POS, randomized uniformly by ±25% per action; `0` disables. Applies per action, unlike `stepDelayMs` (per step) | `0` |
+| `timesInSeconds` | Display only: `true` prints times in seconds (`1.45 s`) in the console and text report; `false` prints milliseconds (`1450 ms`). The JSON report always stays in seconds (`*Sec` fields) | `true` |
 | `stepDelayMs` | Observation pause in ms after each passed step (incl. the last); `0` disables. Counted in step/total timing; distinct from `--slow-mo` (per browser operation); not used for dry-run/skipped/failed steps | `0` |
 | `ignoreHttpsErrors` | Opt-in: accept a trusted self-signed HTTPS certificate for the run's context only | `false` |
 | `browserState` | Browser state per run. Only `"fresh"` (new isolated context) is supported; other values are rejected | `"fresh"` |

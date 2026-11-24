@@ -6,7 +6,7 @@ import { parseScript } from "../src/parser.js";
 import { exactCashAmount, jitteredDelay, scanCompleted } from "../src/xstore.js";
 import { roundSec } from "../src/runner.js";
 import { httpUrl, loadConfiguration, readJson } from "../src/config.js";
-import { formatRunSummary, formatStepLog, runScript } from "../src/runner.js";
+import { formatRunSummary, formatScanTime, formatStepLog, runScript } from "../src/runner.js";
 import { workspace } from "./helpers.js";
 
 // Verifies the sample script maps to the seven expected actions with original line numbers.
@@ -68,6 +68,7 @@ test("configuration overrides are validated and base URL override wins", async t
   assert.equal(config.ignoreHttpsErrors, false);
   assert.equal(config.stepDelayMs, 0);
   assert.equal(config.humanDelayMs, 0);
+  assert.equal(config.timesInSeconds, true);
   assert.equal((await loadConfiguration("config/localhost-shell.json")).humanDelayMs, 400);
   assert.equal((await loadConfiguration("config/localhost-shell.json")).stepDelayMs, 0);
   assert.equal((await loadConfiguration("config/localhost-shell.json")).ignoreHttpsErrors, true);
@@ -265,6 +266,20 @@ test("selector overrides allow an empty saleLineQuantity only", async t => {
   assert.equal((await loadConfiguration(file)).selectors.saleLineQuantity, "");
   await writeFile(file, JSON.stringify({ selectors: { scanInput: "" } }));
   await assert.rejects(loadConfiguration(file), /non-empty/);
+});
+
+test("formatters show milliseconds when timesInSeconds is disabled", () => {
+  const step = { stepNumber: 2, line: 5, step: "x", status: "passed" as const, durationSec: 1.45, executionSec: 0.25, humanDelaySec: 0.2, observationDelaySec: 1 };
+  assert.equal(formatStepLog(step, false), "[passed] step 2 (elapsed 1450 ms = execution 250 ms + human delay 200 ms + observation delay 1000 ms)");
+  assert.equal(formatScanTime({ saleId: "1", seconds: 1.234 }, false), "[scan-time] item 1 took 1234 milliseconds to complete scanning");
+});
+
+test("timesInSeconds must be a boolean", async t => {
+  const file = resolve(await workspace(t), "units.json");
+  await writeFile(file, JSON.stringify({ timesInSeconds: false }));
+  assert.equal((await loadConfiguration(file)).timesInSeconds, false);
+  await writeFile(file, JSON.stringify({ timesInSeconds: "no" }));
+  await assert.rejects(loadConfiguration(file), /timesInSeconds must be a boolean/);
 });
 
 test("roundSec keeps at most 3 decimals", () => {

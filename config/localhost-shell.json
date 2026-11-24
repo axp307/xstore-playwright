@@ -4,5 +4,6 @@
   "browserState": "fresh",
   "ignoreHttpsErrors": true,
   "stepDelayMs": 0,
-  "humanDelayMs": 400
+  "humanDelayMs": 400,
+  "timesInSeconds": true
 }

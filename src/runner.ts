@@ -68,22 +68,30 @@ export interface ScanTime {
   seconds: number;
 }
 
-export function formatScanTime(scan: ScanTime): string {
-  return `[scan-time] item ${scan.saleId} took ${scan.seconds.toFixed(3)} seconds to complete scanning`;
+// Renders a duration held in seconds as "1.45 s" or, when timesInSeconds is false, "1450 ms".
+export function formatTime(seconds: number, inSeconds = true): string {
+  return inSeconds ? `${seconds} s` : `${Math.round(seconds * 1000)} ms`;
+}
+
+export function formatScanTime(scan: ScanTime, inSeconds = true): string {
+  const took = inSeconds ? `${scan.seconds.toFixed(3)} seconds` : `${Math.round(scan.seconds * 1000)} milliseconds`;
+  return `[scan-time] item ${scan.saleId} took ${took} to complete scanning`;
 }
 
 // Formats the terminal completion line for a step from the same measured fields stored in the report.
 // Shows elapsed time as execution plus human delay plus observation delay so console and report agree.
-export function formatStepLog(step: StepResult): string {
-  return `[${step.status}] step ${step.stepNumber} (elapsed ${step.durationSec} s = execution ${step.executionSec} s + human delay ${step.humanDelaySec} s + observation delay ${step.observationDelaySec} s)`;
+export function formatStepLog(step: StepResult, inSeconds = true): string {
+  const t = (value: number) => formatTime(value, inSeconds);
+  return `[${step.status}] step ${step.stepNumber} (elapsed ${t(step.durationSec)} = execution ${t(step.executionSec)} + human delay ${t(step.humanDelaySec)} + observation delay ${t(step.observationDelaySec)})`;
 }
 
 // Formats the CLI end-of-run summary: summed step time versus wall-clock total.
 // The difference is browser startup/cleanup and other overhead outside any step.
-export function formatRunSummary(report: RunReport): string {
+export function formatRunSummary(report: RunReport, inSeconds = true): string {
+  const t = (value: number) => formatTime(value, inSeconds);
   const overhead = roundSec(Math.max(0, report.durationSec - report.stepExecutionSec - report.stepHumanDelaySec - report.stepObservationDelaySec));
-  return `Run ${report.status}; steps: execution ${report.stepExecutionSec} s + human delay ${report.stepHumanDelaySec} s + observation delay ${report.stepObservationDelaySec} s; `
-    + `wall-clock total ${report.durationSec} s (includes ~${overhead} s browser startup/cleanup and other overhead).`;
+  return `Run ${report.status}; steps: execution ${t(report.stepExecutionSec)} + human delay ${t(report.stepHumanDelaySec)} + observation delay ${t(report.stepObservationDelaySec)}; `
+    + `wall-clock total ${t(report.durationSec)} (includes ~${t(overhead)} browser startup/cleanup and other overhead).`;
 }
 
 // Masks editable and configured input fields before capturing failure evidence.
@@ -189,7 +197,7 @@ export async function runScript(options: RunOptions): Promise<{
           result.status = await executeAction(page, step.action, options.config, data.get(step.line), items.get(step.line), (saleId, seconds) => {
             const scan = { saleId: redact(saleId), seconds };
             report.scanTimes.push(scan);
-            console.log(formatScanTime(scan));
+            console.log(formatScanTime(scan, options.config.timesInSeconds));
           });
           result.humanDelaySec = takeHumanDelaySec(page);
           // Deliberate observation pause; counted in this step's durationSec and the run total.
@@ -213,7 +221,7 @@ export async function runScript(options: RunOptions): Promise<{
             result.executionSec = roundSec(Math.max(0, elapsedSec(stepStarted) - result.humanDelaySec));
           }
           result.durationSec = roundSec(result.executionSec + result.humanDelaySec + result.observationDelaySec);
-          console.log(formatStepLog(result));
+          console.log(formatStepLog(result, options.config.timesInSeconds));
         }
         if (report.status === "failed") break;
       }
@@ -233,15 +241,16 @@ export async function runScript(options: RunOptions): Promise<{
     report.stepExecutionSec = roundSec(report.steps.reduce((sum, step) => sum + step.executionSec, 0));
     report.stepHumanDelaySec = roundSec(report.steps.reduce((sum, step) => sum + step.humanDelaySec, 0));
     report.stepObservationDelaySec = roundSec(report.steps.reduce((sum, step) => sum + step.observationDelaySec, 0));
+    const t = (value: number) => formatTime(value, options.config.timesInSeconds);
     const lines = [
       `Run: ${report.status} (${report.mode})`,
       `Started: ${report.startedAt}`, `Finished: ${report.finishedAt}`,
-      `Total elapsed (wall-clock, incl. browser launch/close): ${report.durationSec} s`,
-      `Steps: execution ${report.stepExecutionSec} s + human delay ${report.stepHumanDelaySec} s + observation delay ${report.stepObservationDelaySec} s = ${roundSec(report.stepExecutionSec + report.stepHumanDelaySec + report.stepObservationDelaySec)} s`,
+      `Total elapsed (wall-clock, incl. browser launch/close): ${t(report.durationSec)}`,
+      `Steps: execution ${t(report.stepExecutionSec)} + human delay ${t(report.stepHumanDelaySec)} + observation delay ${t(report.stepObservationDelaySec)} = ${t(roundSec(report.stepExecutionSec + report.stepHumanDelaySec + report.stepObservationDelaySec))}`,
       "Execution includes Playwright --slow-mo; human delay is the humanDelayMs pause before each click/fill/key press; observation delay is the stepDelayMs pause after passed steps.",
       ...report.steps.map(step =>
-        `${step.stepNumber}. [${step.status}] ${step.durationSec} s (execution ${step.executionSec} s + human delay ${step.humanDelaySec} s + observation delay ${step.observationDelaySec} s) - ${step.step}${step.error ? `\n   ${step.error}` : ""}${step.screenshot ? `\n   Screenshot: ${step.screenshot}` : ""}`),
-      ...report.scanTimes.map(formatScanTime),
+        `${step.stepNumber}. [${step.status}] ${t(step.durationSec)} (execution ${t(step.executionSec)} + human delay ${t(step.humanDelaySec)} + observation delay ${t(step.observationDelaySec)}) - ${step.step}${step.error ? `\n   ${step.error}` : ""}${step.screenshot ? `\n   Screenshot: ${step.screenshot}` : ""}`),
+      ...report.scanTimes.map(scan => formatScanTime(scan, options.config.timesInSeconds)),
       ...(report.error ? [`Run error: ${report.error}`] : [])
     ];
     await writeFile(jsonPath, JSON.stringify(report, null, 2) + "\n", { mode: 0o600 });
