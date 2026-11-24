@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseScript } from "../src/parser.js";
-import { exactCashAmount, scanCompleted } from "../src/xstore.js";
+import { exactCashAmount, jitteredDelay, scanCompleted } from "../src/xstore.js";
+import { roundSec } from "../src/runner.js";
 import { httpUrl, loadConfiguration, readJson } from "../src/config.js";
-import { formatRunSummary, formatStepLog, runScript } from "../src/runner.js";
+import { formatRunSummary, formatScanTime, formatStepLog, runScript } from "../src/runner.js";
 import { workspace } from "./helpers.js";
 
 // Verifies the sample script maps to the seven expected actions with original line numbers.
@@ -66,6 +67,9 @@ test("configuration overrides are validated and base URL override wins", async t
   assert.equal(config.browserState, "fresh");
   assert.equal(config.ignoreHttpsErrors, false);
   assert.equal(config.stepDelayMs, 0);
+  assert.equal(config.humanDelayMs, 0);
+  assert.equal(config.timesInSeconds, true);
+  assert.equal((await loadConfiguration("config/localhost-shell.json")).humanDelayMs, 400);
   assert.equal((await loadConfiguration("config/localhost-shell.json")).stepDelayMs, 0);
   assert.equal((await loadConfiguration("config/localhost-shell.json")).ignoreHttpsErrors, true);
   await writeFile(file, JSON.stringify({ browserState: "fresh" }));
@@ -81,7 +85,7 @@ test("configuration overrides are validated and base URL override wins", async t
   assert.equal(httpUrl("login", config.baseUrl), "https://test.example.com/pos/login");
   assert.equal(httpUrl("/login", config.baseUrl), "https://test.example.com/login");
   for (const input of [
-    { timeoutMs: 0 }, { ignoreHttpsErrors: "yes" }, { stepDelayMs: -1 }, { stepDelayMs: 1.5 }, { stepDelayMs: "1000" }, { stepDelayMs: null }, { browserState: "persistent" }, { browserState: null }, { timeoutMs: "100" }, { baseUrl: "file:///tmp/app" },
+    { timeoutMs: 0 }, { ignoreHttpsErrors: "yes" }, { stepDelayMs: -1 }, { stepDelayMs: 1.5 }, { stepDelayMs: "1000" }, { stepDelayMs: null }, { humanDelayMs: -1 }, { humanDelayMs: "400" }, { browserState: "persistent" }, { browserState: null }, { timeoutMs: "100" }, { baseUrl: "file:///tmp/app" },
     { selectors: { usernme: "#user" } }, { selectors: { toString: "#x" } },
     { selectors: { username: "" } }, { unknownOption: true },
     { amountFormat: { decimalSeparator: ",", groupSeparator: "," } },
@@ -96,13 +100,13 @@ test("configuration overrides are validated and base URL override wins", async t
 // Runs the sample in dry-run mode and checks every step is planned with zero duration.
 // Confirms reports persist and example input values never appear in the text report.
 test("console formatters show the measured execution/observation-delay breakdown", () => {
-  const step = { line: 5, step: "x", status: "passed" as const, durationMs: 1250, executionMs: 250, observationDelayMs: 1000 };
-  assert.equal(formatStepLog(step), "[passed] line 5 (elapsed 1250 ms = execution 250 ms + observation delay 1000 ms)");
+  const step = { stepNumber: 2, line: 5, step: "x", status: "passed" as const, durationSec: 1.45, executionSec: 0.25, humanDelaySec: 0.2, observationDelaySec: 1 };
+  assert.equal(formatStepLog(step), "[passed] step 2 (elapsed 1.45 s = execution 0.25 s + human delay 0.2 s + observation delay 1 s)");
   const summary = formatRunSummary({
-    mode: "browser", status: "passed", startedAt: "", finishedAt: "", durationMs: 2000,
-    stepExecutionMs: 500, stepObservationDelayMs: 1000, scanTimes: [], steps: [step]
+    mode: "browser", status: "passed", startedAt: "", finishedAt: "", durationSec: 2,
+    stepExecutionSec: 0.5, stepHumanDelaySec: 0.4, stepObservationDelaySec: 1, scanTimes: [], steps: [step]
   });
-  assert.equal(summary, "Run passed; steps: execution 500 ms + observation delay 1000 ms; wall-clock total 2000 ms (includes ~500 ms browser startup/cleanup and other overhead).");
+  assert.equal(summary, "Run passed; steps: execution 0.5 s + human delay 0.4 s + observation delay 1 s; wall-clock total 2 s (includes ~0.1 s browser startup/cleanup and other overhead).");
 });
 
 test("dry-run validates external files and writes planned steps without launching a browser", async t => {
@@ -114,12 +118,12 @@ test("dry-run validates external files and writes planned steps without launchin
   assert.equal(result.report.status, "passed");
   assert.equal(result.report.mode, "dry-run");
   assert.equal(result.report.steps.length, 7);
-  assert.ok(result.report.steps.every(step => step.status === "planned" && step.durationMs === 0 && step.executionMs === 0 && step.observationDelayMs === 0));
-  assert.equal(result.report.stepObservationDelayMs, 0);
-  assert.ok(result.report.durationMs >= 0);
+  assert.ok(result.report.steps.every(step => step.status === "planned" && step.durationSec === 0 && step.executionSec === 0 && step.humanDelaySec === 0 && step.observationDelaySec === 0));
+  assert.equal(result.report.stepObservationDelaySec, 0);
+  assert.ok(result.report.durationSec >= 0);
   assert.deepEqual(JSON.parse(await readFile(result.jsonPath, "utf8")), result.report);
   const text = await readFile(result.textPath, "utf8");
-  assert.match(text, /Total elapsed \(wall-clock, incl. browser launch\/close\): \d+ ms/);
+  assert.match(text, /Total elapsed \(wall-clock, incl. browser launch\/close\): [\d.]+ s/);
   assert.doesNotMatch(text, /REPLACE_ME|DEMO_USER|DEMO_REGISTER/);
 });
 
@@ -262,4 +266,29 @@ test("selector overrides allow an empty saleLineQuantity only", async t => {
   assert.equal((await loadConfiguration(file)).selectors.saleLineQuantity, "");
   await writeFile(file, JSON.stringify({ selectors: { scanInput: "" } }));
   await assert.rejects(loadConfiguration(file), /non-empty/);
+});
+
+test("formatters show milliseconds when timesInSeconds is disabled", () => {
+  const step = { stepNumber: 2, line: 5, step: "x", status: "passed" as const, durationSec: 1.45, executionSec: 0.25, humanDelaySec: 0.2, observationDelaySec: 1 };
+  assert.equal(formatStepLog(step, false), "[passed] step 2 (elapsed 1450 ms = execution 250 ms + human delay 200 ms + observation delay 1000 ms)");
+  assert.equal(formatScanTime({ saleId: "1", seconds: 1.234 }, false), "[scan-time] item 1 took 1234 milliseconds to complete scanning");
+});
+
+test("timesInSeconds must be a boolean", async t => {
+  const file = resolve(await workspace(t), "units.json");
+  await writeFile(file, JSON.stringify({ timesInSeconds: false }));
+  assert.equal((await loadConfiguration(file)).timesInSeconds, false);
+  await writeFile(file, JSON.stringify({ timesInSeconds: "no" }));
+  await assert.rejects(loadConfiguration(file), /timesInSeconds must be a boolean/);
+});
+
+test("roundSec keeps at most 3 decimals", () => {
+  assert.equal(roundSec(1.23456), 1.235);
+  assert.equal(roundSec(0.1 + 0.2), 0.3);
+});
+
+test("jitteredDelay stays within plus or minus 25% of the human delay", () => {
+  assert.equal(jitteredDelay(400, () => 0), 300);
+  assert.equal(jitteredDelay(400, () => 0.5), 400);
+  assert.equal(jitteredDelay(400, () => 1), 500);
 });

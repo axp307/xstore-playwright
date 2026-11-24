@@ -33,7 +33,7 @@ async function main(): Promise<void> {
     script: values.script, config, dryRun: values["dry-run"], headless: values.headless,
     slowMo, reportDir: values["report-dir"]
   });
-  console.log(`${formatRunSummary(result.report)}
+  console.log(`${formatRunSummary(result.report, config.timesInSeconds)}
 JSON: ${result.jsonPath}
 Text: ${result.textPath}`);
   if (result.report.status === "failed") {

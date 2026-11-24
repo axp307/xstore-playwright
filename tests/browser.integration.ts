@@ -6,7 +6,7 @@ import { readFile, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { chromium } from "playwright";
 import { loadConfiguration } from "../src/config.js";
-import { runScript, saveFailureScreenshot } from "../src/runner.js";
+import { roundSec, runScript, saveFailureScreenshot } from "../src/runner.js";
 import { workspace } from "./helpers.js";
 
 const headless = process.env.HEADED !== "1";
@@ -143,11 +143,37 @@ for (const setup of [true, false]) {
     assert.equal(app.state.completed, true);
     assert.deepEqual(app.state.configuration, setup
       ? { storeId: "DEMO_STORE", registerId: "DEMO_REGISTER" } : undefined);
-    assert.ok(result.report.durationMs >= result.report.steps.reduce((total, step) => total + step.durationMs, 0) - 7);
+    assert.ok(result.report.durationSec >= result.report.steps.reduce((total, step) => total + step.durationSec, 0) - 0.007);
     const persisted = JSON.parse(await readFile(result.jsonPath, "utf8"));
     assert.deepEqual(persisted, result.report);
   });
 }
+
+// With a nonzero humanDelayMs every click/fill/press is paced; the pause is reported apart from execution
+// and the per-page accumulator resets between steps.
+test("human delay is paced per action and reported separately from execution", async t => {
+  const directory = await workspace(t);
+  const app = await mock({ setup: false });
+  t.after(app.close);
+  const config = await loadConfiguration(undefined, app.url);
+  config.timeoutMs = 3000;
+  config.humanDelayMs = 200;
+  const { report } = await runScript({ script: "examples/cash-sale.xstore", config, headless, slowMo, reportDir: directory });
+  assert.equal(report.status, "passed", JSON.stringify(report));
+  const paced = report.steps.filter(step => step.humanDelaySec > 0);
+  const unpaced = report.steps.filter(step => step.status === "passed" && step.humanDelaySec === 0);
+  assert.ok(paced.length >= 4, "steps with clicks/fills/presses must report a human delay");
+  // Each action waits 150-250 ms; a step's total must be a whole number of such pauses.
+  for (const step of paced) assert.ok(step.humanDelaySec >= 0.15 - 0.001, `step ${step.stepNumber} human delay ${step.humanDelaySec}`);
+  // Steps without human actions (e.g. open) report none, proving the accumulator resets between steps.
+  assert.ok(unpaced.length >= 1, "a step without human actions must not inherit earlier delay");
+  assert.equal(report.stepHumanDelaySec, roundSec(report.steps.reduce((sum, step) => sum + step.humanDelaySec, 0)));
+  for (const step of report.steps) {
+    assert.equal(step.durationSec, roundSec(step.executionSec + step.humanDelaySec + step.observationDelaySec));
+  }
+  // Human delay is excluded from execution, so a paced step's execution stays below the whole step.
+  for (const step of paced) assert.ok(step.executionSec < step.durationSec);
+});
 
 // Makes the mock ignore product adds to prove the scan step fails on the cart-count check.
 // Later steps must be not-run and no tender may be sent.
@@ -163,7 +189,7 @@ test("a rejected product fails the scan step and never tenders the transaction",
   assert.equal(report.status, "failed");
   assert.equal(report.steps[5]!.status, "failed");
   assert.equal(report.steps[6]!.status, "not-run");
-  assert.ok(report.steps[5]!.durationMs > 0);
+  assert.ok(report.steps[5]!.durationSec > 0);
   assert.match(report.steps[5]!.error!, /toHaveCount/);
   assert.equal(app.state.completed, false);
   assert.equal(app.state.tender, undefined);
@@ -212,19 +238,19 @@ test("stepDelayMs pauses after passed steps only and is counted in step duration
   const directory = await workspace(t);
   const app = await shellMock({});
   t.after(app.close);
-  const config = { ...(await loadConfiguration("config/localhost-shell.json", app.url)), stepDelayMs: 400 };
+  const config = { ...(await loadConfiguration("config/localhost-shell.json", app.url)), stepDelayMs: 400, humanDelayMs: 0 };
   const { report, textPath } = await runScript({
     script: "smoke/xstore-is-running.xstore", config, headless, slowMo: 0, reportDir: directory
   });
   assert.equal(report.status, "passed");
   for (const step of report.steps) {
-    assert.equal(step.durationMs, step.executionMs + step.observationDelayMs);
-    if (step.status === "passed") assert.ok(step.observationDelayMs >= 390 && step.executionMs < 400, `${step.step}: ${step.durationMs} ms`);
-    else assert.equal(step.observationDelayMs, 0);
+    assert.equal(step.durationSec, roundSec(step.executionSec + step.humanDelaySec + step.observationDelaySec));
+    if (step.status === "passed") assert.ok(step.observationDelaySec >= 0.39 && step.executionSec < 0.4, `${step.step}: ${step.durationSec} s`);
+    else assert.equal(step.observationDelaySec, 0);
   }
-  assert.equal(report.stepObservationDelayMs, report.steps.reduce((sum, step) => sum + step.observationDelayMs, 0));
-  assert.ok(report.durationMs >= report.stepExecutionMs + report.stepObservationDelayMs - 3);
-  assert.match(await readFile(textPath, "utf8"), /execution \d+ ms \+ observation delay \d+ ms/);
+  assert.equal(report.stepObservationDelaySec, roundSec(report.steps.reduce((sum, step) => sum + step.observationDelaySec, 0)));
+  assert.ok(report.durationSec >= report.stepExecutionSec + report.stepHumanDelaySec + report.stepObservationDelaySec - 0.003);
+  assert.match(await readFile(textPath, "utf8"), /execution [\d.]+ s \+ human delay [\d.]+ s \+ observation delay [\d.]+ s/);
 });
 
 // Starts a local HTTP server imitating the Xstore shell app: two setup forms, a Test Connection dialog,
