@@ -5,10 +5,13 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { chromium } from "playwright";
-import type { Page } from "playwright";
+import { expect } from "playwright/test";
+import type { Locator } from "playwright";
 import { loadConfiguration, readJson, saleItems, strings } from "../src/config.js";
 import { parseScript } from "../src/parser.js";
-import { executeAction } from "../src/xstore.js";
+import { saveFailureScreenshot } from "../src/runner.js";
+import { executeAction, scanCompleted } from "../src/xstore.js";
+import type { SaleLineSnapshot } from "../src/xstore.js";
 
 interface DomNode { path: string; tag: string; id: string; cls: string; text: string }
 
@@ -33,64 +36,77 @@ const describeInPage = new Function("root", `
   walk(root, root.tagName.toLowerCase());
   return out;
 `) as (root: Element) => DomNode[];
-const describe = (page: Page): Promise<DomNode[]> =>
-  page.locator(config.selectors.saleLines).first().evaluate(describeInPage);
+const describe = (line: Locator): Promise<DomNode[]> => line.evaluate(describeInPage);
 
 const browser = await chromium.launch({ headless: false, slowMo: 0 });
 try {
   const context = await browser.newContext({ ignoreHTTPSErrors: config.ignoreHttpsErrors });
   context.setDefaultTimeout(config.timeoutMs);
   const page = await context.newPage();
-  const cartReady = () => page.getByText("Shopping Cart", { exact: true }).first().waitFor({ timeout: 8000 }).then(() => true, () => false);
-  for (const step of steps.slice(0, scanIndex)) {
-    const action = step.action;
-    // A sale left open by an earlier run resumes on the cart, which has no login or menu to step through.
-    if (step.line > steps[1]!.line && await cartReady()) break;
-    const needsFile = ["configure", "login", "xstoreLogin", "shellConfigure"].includes(action.kind);
-    const data = needsFile
-      ? strings(await readJson(resolve(dirname(scriptPath), (action as { file: string }).file)), `Input at line ${step.line}`)
-      : undefined;
-    console.log(`[running] line ${step.line}: ${step.text}`);
-    await executeAction(page, action, config, data);
-  }
-  const lines = page.locator(config.selectors.saleLines);
-  const scanOnce = async () => {
-    await page.locator(config.selectors.scanInput).fill(item.saleId);
-    await page.locator(config.selectors.scanInput).press("Enter");
-  };
-  await scanOnce();
-  await lines.first().waitFor({ timeout: 10000 }).catch(async error => {
+  // Inputs are masked and the file is owner-only; page text is deliberately not logged (customer data).
+  const failureShot = async (error: unknown): Promise<never> => {
     await mkdir("reports", { recursive: true });
-    await page.screenshot({ path: "reports/quantity-discovery-failure.png" });
-    console.log("Screenshot: reports/quantity-discovery-failure.png");
-    console.log("Screen text at failure:", (await page.locator("body").innerText()).replace(/\s+/g, " ").slice(0, 600));
+    const file = resolve("reports", `quantity-discovery-failure-${Date.now()}.png`);
+    await saveFailureScreenshot(page, config, file).then(() => console.log(`Masked screenshot: ${file}`), () => undefined);
     throw error;
-  });
-  const first = await describe(page);
-  const firstText = await lines.first().innerText();
-  const count = await lines.count();
-  await scanOnce();
-  // Either the first line changes (quantity) or a new line appears, whichever Xstore does for a repeat.
-  await page.waitForFunction(([selector, text, n]) => {
-    const els = document.querySelectorAll(selector as string);
-    return els.length > (n as number) || (els[0] as HTMLElement | undefined)?.innerText !== text;
-  }, [config.selectors.saleLines, firstText, count] as const);
-  const afterCount = await lines.count();
-  const second = await describe(page);
+  };
+  try {
+    const cartReady = () => page.getByText("Shopping Cart", { exact: true }).first().waitFor({ timeout: 8000 }).then(() => true, () => false);
+    for (const step of steps.slice(0, scanIndex)) {
+      const action = step.action;
+      // A sale left open by an earlier run resumes on the cart, which has no login or menu to step through.
+      if (step.line > steps[1]!.line && await cartReady()) break;
+      const needsFile = ["configure", "login", "xstoreLogin", "shellConfigure"].includes(action.kind);
+      const data = needsFile
+        ? strings(await readJson(resolve(dirname(scriptPath), (action as { file: string }).file)), `Input at line ${step.line}`)
+        : undefined;
+      console.log(`[running] line ${step.line}: ${step.text}`);
+      await executeAction(page, action, config, data);
+    }
+    const lines = page.locator(config.selectors.saleLines);
+    const cart = (): Promise<SaleLineSnapshot[]> =>
+      lines.evaluateAll(elements => elements.map(element => ({ id: element.id, text: (element as HTMLElement).innerText })));
+    // Submits the sale ID and waits for this scan's acknowledgement, whatever the cart already held.
+    const scanOnce = async () => {
+      const snapshotBefore = await cart();
+      await page.locator(config.selectors.scanInput).fill(item.saleId);
+      await page.locator(config.selectors.scanInput).press("Enter");
+      await expect(async () => {
+        expect(scanCompleted(snapshotBefore, await cart(), item.saleId), "scan was not acknowledged").toBe(true);
+      }).toPass({ timeout: config.timeoutMs });
+    };
+    const escapedId = item.saleId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const token = new RegExp(`(?<![\\w.,$-])${escapedId}(?!\\w|[.,]\\d)`);
+    // The submitted item's own line, tracked by DOM id so other rows in a resumed cart are never compared.
+    const itemLine = async () => {
+      const match = (await cart()).find(line => token.test(line.text));
+      if (!match) throw new Error(`No sale line shows sale ID ${item.saleId}.`);
+      return page.locator(`[id="${match.id}"]`);
+    };
+    await scanOnce();
+    const target = await itemLine();
+    const first = await describe(target);
+    const count = await lines.count();
+    await scanOnce();
+    const afterCount = await lines.count();
+    const second = await describe(target);
 
-  const before = new Map(first.map(n => [n.path, n]));
-  const changed = second.filter(n => {
-    const old = before.get(n.path);
-    return !old || old.text !== n.text || old.cls !== n.cls;
-  }).map(n => ({ ...n, was: before.get(n.path)?.text }));
-  console.log(`\nLines before: ${count}, after second scan: ${afterCount}`);
-  console.log(afterCount > count ? "Repeated scan added a NEW line." : "Repeated scan changed the existing line.");
-  console.log("Changed nodes in the first sale line:");
-  console.table(changed.map(n => ({ path: n.path, id: n.id, class: n.cls, was: n.was, now: n.text })));
-  await mkdir("reports", { recursive: true });
-  const file = resolve("reports", `quantity-discovery-${Date.now()}.json`);
-  await writeFile(file, JSON.stringify({ saleId: item.saleId, count, afterCount, first, second, changed }, null, 2), { mode: 0o600 });
-  console.log(`Full DOM snapshots written to ${file}`);
+    const before = new Map(first.map(n => [n.path, n]));
+    const changed = second.filter(n => {
+      const old = before.get(n.path);
+      return !old || old.text !== n.text || old.cls !== n.cls;
+    }).map(n => ({ ...n, was: before.get(n.path)?.text }));
+    console.log(`\nLines before: ${count}, after second scan: ${afterCount}`);
+    console.log(afterCount > count ? "Repeated scan added a NEW line." : "Repeated scan changed the existing line.");
+    console.log("Changed nodes in the first sale line:");
+    console.table(changed.map(n => ({ path: n.path, id: n.id, class: n.cls, was: n.was, now: n.text })));
+    await mkdir("reports", { recursive: true });
+    const file = resolve("reports", `quantity-discovery-${Date.now()}.json`);
+    await writeFile(file, JSON.stringify({ saleId: item.saleId, count, afterCount, first, second, changed }, null, 2), { mode: 0o600 });
+    console.log(`Full DOM snapshots written to ${file}`);
+  } catch (error) {
+    await failureShot(error);
+  }
 } finally {
   await browser.close();
 }

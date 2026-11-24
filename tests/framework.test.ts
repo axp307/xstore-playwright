@@ -253,3 +253,13 @@ test("scanCompleted requires a new line or a change on the line with the exact s
   assert.equal(scanCompleted([line("a", "555 Brush qty 1")], [line("a", "555 Brush qty 2")], "555"), true);
   assert.equal(scanCompleted([line("a", "555 Brush qty 1")], [line("a", "555 Brush qty 1")], "555"), false);
 });
+
+// An empty saleLineQuantity disables quantity parsing; other selectors must stay non-empty.
+test("selector overrides allow an empty saleLineQuantity only", async t => {
+  const directory = await workspace(t);
+  const file = resolve(directory, "quantity.json");
+  await writeFile(file, JSON.stringify({ selectors: { saleLineQuantity: "" } }));
+  assert.equal((await loadConfiguration(file)).selectors.saleLineQuantity, "");
+  await writeFile(file, JSON.stringify({ selectors: { scanInput: "" } }));
+  await assert.rejects(loadConfiguration(file), /non-empty/);
+});
