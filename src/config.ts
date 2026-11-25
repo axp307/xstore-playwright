@@ -97,6 +97,110 @@ export interface Configuration {
   selectors: typeof defaultSelectors;
   configurationFields: Record<string, string>;
   amountFormat: { decimalSeparator: string; groupSeparator: string; currencySymbol: string };
+  xstore?: XstoreConnection | undefined;
+}
+
+export interface XstoreConnection {
+  organizationId: number;
+  retailLocationId: number;
+  workstationId: number;
+  installationToken: string;
+  shellAppVersion?: string | undefined;
+  database?: { host: string; port: number; serviceName: string; user: string; password: string } | undefined;
+}
+
+function knownKeys(value: Record<string, unknown>, allowed: string[], label: string): void {
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) throw new Error(`Unknown ${label} key: ${key}`);
+  }
+}
+
+function positiveInteger(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${label} must be a positive safe integer.`);
+  }
+  return value;
+}
+
+function environmentSecret(name: unknown, fallback: string, env: NodeJS.ProcessEnv): string {
+  const key = name === undefined ? fallback : name;
+  if (typeof key !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+    throw new Error("Secret environment variable names must be valid identifiers.");
+  }
+  const value = env[key];
+  if (!value?.trim() || /[\r\n\0]/.test(value)) throw new Error(`Set the ${key} environment variable.`);
+  return value;
+}
+
+export function xstoreConnection(value: unknown, baseUrl: string, env: NodeJS.ProcessEnv = process.env): XstoreConnection {
+  const raw = object(value, "xstore");
+  knownKeys(raw, [
+    "organizationId", "retailLocationId", "workstationId", "installationTokenEnv",
+    "shellAppVersion", "revalidateToken", "database"
+  ], "xstore");
+  const url = new URL(baseUrl);
+  if (url.pathname !== "/" || url.search || url.hash) {
+    throw new Error("With xstore settings, baseUrl must be an origin without a path, query or fragment.");
+  }
+  const revalidate = raw.revalidateToken === undefined ? true : raw.revalidateToken;
+  if (typeof revalidate !== "boolean") throw new Error("xstore.revalidateToken must be a boolean.");
+  if (raw.shellAppVersion !== undefined
+    && (typeof raw.shellAppVersion !== "string" || !/^[\w.-]+$/.test(raw.shellAppVersion))) {
+    throw new Error("xstore.shellAppVersion must be a non-empty version string.");
+  }
+  const result: XstoreConnection = {
+    organizationId: positiveInteger(raw.organizationId === undefined ? 1 : raw.organizationId, "xstore.organizationId"),
+    retailLocationId: positiveInteger(raw.retailLocationId, "xstore.retailLocationId"),
+    workstationId: positiveInteger(raw.workstationId === undefined ? 1 : raw.workstationId, "xstore.workstationId"),
+    installationToken: environmentSecret(raw.installationTokenEnv, "XSTORE_INSTALLATION_TOKEN", env),
+    shellAppVersion: raw.shellAppVersion
+  };
+  const db = raw.database === undefined ? {} : object(raw.database, "xstore.database");
+  knownKeys(db, ["host", "port", "serviceName", "userEnv", "passwordEnv"], "xstore.database");
+  if (!revalidate) {
+    if (raw.database !== undefined) throw new Error("xstore.database requires revalidateToken: true.");
+    return result;
+  }
+  const host = db.host === undefined ? "localhost" : db.host;
+  const port = positiveInteger(db.port === undefined ? 1521 : db.port, "xstore.database.port");
+  const serviceName = db.serviceName === undefined ? "shw_xstore_23_0" : db.serviceName;
+  if (typeof host !== "string" || !/^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(host)) {
+    throw new Error("xstore.database.host must be a hostname or IPv4 address.");
+  }
+  if (port > 65535) throw new Error("xstore.database.port must be from 1 to 65535.");
+  if (typeof serviceName !== "string" || !/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(serviceName)) {
+    throw new Error("xstore.database.serviceName must be an Oracle service name, not a URL.");
+  }
+  if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname.toLowerCase())
+    && (db.host === undefined || db.serviceName === undefined)) {
+    throw new Error("Remote Xstore revalidation requires explicit database.host and database.serviceName.");
+  }
+  result.database = {
+    host, port, serviceName,
+    user: environmentSecret(db.userEnv, "XSTORE_DB_USER", env),
+    password: environmentSecret(db.passwordEnv, "XSTORE_DB_PASSWORD", env)
+  };
+  return result;
+}
+
+// Existing root/shell entry points select the configured client without changing scripts.
+export function appUrl(target: string, config: Configuration): string {
+  if (!config.xstore) return httpUrl(target, config.baseUrl);
+  if (!["/", "/xstoreshellapp/"].includes(target)) {
+    throw new Error('With xstore settings, Open app must target "/" or "/xstoreshellapp/".');
+  }
+  const url = new URL("/xstoreclient/", config.baseUrl);
+  const x = config.xstore;
+  url.search = new URLSearchParams({
+    FORM_FACTOR: "tablet",
+    SERVER_PORT: url.port || (url.protocol === "https:" ? "443" : "80"),
+    RETAIL_LOCATION_ID: String(x.retailLocationId),
+    WORKSTATION_ID: String(x.workstationId),
+    SERVER_ADDRESS: url.hostname,
+    INSTALLATION_TOKEN: x.installationToken,
+    ...(x.shellAppVersion ? { SHELL_APP_VERSION: x.shellAppVersion } : {})
+  }).toString();
+  return url.href;
 }
 
 // Narrows an unknown JSON value to a plain object or throws with a labelled message.
@@ -178,11 +282,11 @@ export function httpUrl(target: string, base?: string): string {
 // Merges selector overrides over defaultSelectors and rejects unknown keys or bad formats.
 export async function loadConfiguration(file?: string, baseUrl?: string): Promise<Configuration> {
   const raw = file ? object(await readJson(file), "Configuration") : {};
-  const allowed = ["baseUrl", "timeoutMs", "selectors", "configurationFields", "amountFormat", "browserState", "ignoreHttpsErrors", "stepDelayMs", "humanDelayMs", "timesInSeconds"];
+  const allowed = ["baseUrl", "timeoutMs", "selectors", "configurationFields", "amountFormat", "browserState", "ignoreHttpsErrors", "stepDelayMs", "humanDelayMs", "timesInSeconds", "xstore"];
   for (const key of Object.keys(raw)) {
     if (!allowed.includes(key)) throw new Error(`Unknown configuration key: ${key}`);
   }
-  const base = baseUrl ?? raw.baseUrl ?? "http://localhost:8080";
+  const base = baseUrl ?? raw.baseUrl ?? (raw.xstore === undefined ? "http://localhost:8080" : "https://localhost:8443");
   if (typeof base !== "string") throw new Error("baseUrl must be a string.");
   const browserState = raw.browserState === undefined ? "fresh" : raw.browserState;
   if (browserState !== "fresh") {
@@ -238,6 +342,7 @@ export async function loadConfiguration(file?: string, baseUrl?: string): Promis
     timesInSeconds,
     selectors: { ...defaultSelectors, ...overrides },
     configurationFields: fields,
-    amountFormat: format
+    amountFormat: format,
+    xstore: raw.xstore === undefined ? undefined : xstoreConnection(raw.xstore, httpUrl(base))
   };
 }

@@ -1,0 +1,20 @@
+{
+  "baseUrl": "https://localhost:8443",
+  "timeoutMs": 30000,
+  "ignoreHttpsErrors": true,
+  "humanDelayMs": 400,
+  "xstore": {
+    "organizationId": 1,
+    "retailLocationId": 721197,
+    "workstationId": 1,
+    "installationTokenEnv": "XSTORE_INSTALLATION_TOKEN",
+    "revalidateToken": true,
+    "database": {
+      "host": "localhost",
+      "port": 1521,
+      "serviceName": "shw_xstore_23_0",
+      "userEnv": "XSTORE_DB_USER",
+      "passwordEnv": "XSTORE_DB_PASSWORD"
+    }
+  }
+}

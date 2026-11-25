@@ -51,8 +51,43 @@ See the [Technical Overview](docs/wiki/Technical-Overview.md) for framework
 architecture, script syntax, configuration, reports, testing, and extension
 details.
 
-## IMPORTANT Note about tokens
+## Reuse and revalidate a device token
 
-If this test is run on a system, it may invalidate existing session tokens from other users, so there may be some "Access Not Allowed" messages observed after running this tool.
+Xstore blocks other device tokens on the same register when a new installation
+connects. By default, each fresh browser run creates a new installation.
+To avoid this, copy `config/xstore-device.example.json` to
+`config/xstore-device.local.json`, review the organization/store/register, and
+set these environment variables securely in your shell:
 
-To fix this, go to the database > CTL_CHEETAH_DEVICE_ACCESS and set the field STATUS to ENABLED for the relevant token.
+| Variable | Value |
+| --- | --- |
+| `XSTORE_INSTALLATION_TOKEN` | An existing authorized device's `INSTALLATION_TOKEN`, reused on every run |
+| `XSTORE_DB_USER` | Local Oracle schema user with access to `CTL_CHEETAH_DEVICE_ACCESS` |
+| `XSTORE_DB_PASSWORD` | That user's database password |
+
+```sh
+npm start -- --script smoke/xstore-is-running.xstore \
+  --config config/xstore-device.local.json
+```
+
+The runner opens `/xstoreclient/` directly with that token; no shell setup is
+needed. Before opening the browser it sets **only the matching token** to
+`ENABLED` in `CTL_CHEETAH_DEVICE_ACCESS`, scoped by organization, store and
+register. Missing, mismatched, quick-config or pending-approval records fail
+instead of enabling unrelated devices. A new token must first be authorized
+through Xstore. Only `ENABLED` and `BLOCKED` records are eligible.
+
+The database defaults to `localhost:1521/shw_xstore_23_0` (Oracle service name,
+not the shell's HTTPS URL). `baseUrl` sets the web host/port; database connection
+settings are separate. A lab needs an explicitly configured web origin,
+database host and service name. Use authorized non-production environments
+only. Set `xstore.revalidateToken` to `false` and omit `xstore.database` to reuse
+the token without database access.
+
+Browser cookies remain isolated between runs. Device tokens do **not** isolate
+server-side cashier or transaction state: use a dedicated test register, and
+do not run Electron and automation concurrently on the same device identity.
+No token can prevent another newly installed device from blocking it.
+Dry-run validates inputs but never connects to Oracle or Xstore. Keep tokens,
+passwords and token-bearing URLs out of git; `.env` is ignored but is **not**
+automatically loaded.
