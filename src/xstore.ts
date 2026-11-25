@@ -2,7 +2,7 @@ import { expect } from "playwright/test";
 import type { Locator, Page } from "playwright";
 import { performance } from "node:perf_hooks";
 import type { Configuration } from "./config.js";
-import { httpUrl } from "./config.js";
+import { appUrl } from "./config.js";
 import type { SaleItem } from "./config.js";
 import type { Action } from "./parser.js";
 
@@ -126,7 +126,7 @@ export async function executeAction(
   const field = (selector: string) => humanize(page, config, page.locator(selector));
   switch (action.kind) {
     case "open": {
-      const response = await page.goto(httpUrl(action.target, config.baseUrl), { waitUntil: "domcontentloaded" });
+      const response = await page.goto(appUrl(action.target, config), { waitUntil: "domcontentloaded" });
       if (response && !response.ok()) throw new Error(`App navigation returned HTTP ${response.status()}.`);
       break;
     }

@@ -5,12 +5,55 @@ import type { AddressInfo } from "node:net";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { chromium } from "playwright";
-import { loadConfiguration } from "../src/config.js";
+import { loadConfiguration, xstoreConnection } from "../src/config.js";
 import { roundSec, runScript, saveFailureScreenshot } from "../src/runner.js";
 import { workspace } from "./helpers.js";
 
 const headless = process.env.HEADED !== "1";
 const slowMo = headless ? 0 : 100;
+
+test("restarted scripts reuse the installation token with isolated browser state and redact failures", async t => {
+  const directory = await workspace(t);
+  const navigations: URL[] = [];
+  const cookies: (string | undefined)[] = [];
+  const server = createServer((request, response) => {
+    const url = new URL(request.url!, "http://localhost");
+    if (url.pathname === "/xstoreclient/") {
+      navigations.push(url);
+      cookies.push(request.headers.cookie);
+    }
+    response.writeHead(200, { "Content-Type": "text/html", "Set-Cookie": "previousRun=1" });
+    response.end('<div id="focusBarInfoArea">Log In<div id="focusBarInputField"><input></div></div>');
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())));
+  const address = server.address() as AddressInfo;
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const token = "synthetic-token-for-restart";
+  const config = await loadConfiguration(undefined, baseUrl);
+  config.timeoutMs = 500;
+  config.xstore = xstoreConnection({
+    retailLocationId: 123, revalidateToken: false
+  }, baseUrl, { XSTORE_INSTALLATION_TOKEN: token });
+  for (let run = 0; run < 2; run++) {
+    const result = await runScript({
+      script: "smoke/xstore-is-running.xstore", config, headless, slowMo: 0, reportDir: directory
+    });
+    assert.equal(result.report.status, "passed", JSON.stringify(result.report));
+    for (const file of [result.jsonPath, result.textPath]) assert.ok(!(await readFile(file, "utf8")).includes(token));
+  }
+  assert.equal(navigations.length, 2);
+  assert.ok(navigations.every(url => url.searchParams.get("INSTALLATION_TOKEN") === token));
+  assert.ok(navigations.every(url => url.searchParams.get("SERVER_PORT") === String(address.port)));
+  assert.deepEqual(cookies, [undefined, undefined], "tokens persist without carrying cashier cookies between runs");
+  config.selectors.loginReady = `#missing-${token}`;
+  const failure = await runScript({
+    script: "smoke/xstore-is-running.xstore", config, headless, slowMo: 0, reportDir: directory
+  });
+  assert.equal(failure.report.status, "failed");
+  assert.match(failure.report.steps[1]!.error!, /\[REDACTED\]/);
+  for (const file of [failure.jsonPath, failure.textPath]) assert.ok(!(await readFile(file, "utf8")).includes(token));
+});
 
 interface MockState {
   configuration: Record<string, string> | undefined;

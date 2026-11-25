@@ -4,10 +4,11 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
-import { httpUrl, readJson, saleItems, strings } from "./config.js";
+import { appUrl, readJson, saleItems, strings } from "./config.js";
 import type { Configuration, SaleItem } from "./config.js";
 import { parseScript } from "./parser.js";
 import { executeAction, takeHumanDelaySec } from "./xstore.js";
+import { revalidateDeviceAccess } from "./device-access.js";
 
 // Rounds seconds to at most 3 decimals (millisecond precision).
 export function roundSec(seconds: number): number {
@@ -103,6 +104,7 @@ export async function saveFailureScreenshot(page: Page, config: Configuration, f
     s.username, s.password, ...Object.values(config.configurationFields),
     s.shellStore, s.shellRegister, s.shellHost, s.shellPort
   ].map(selector => page.locator(selector));
+  if (config.xstore) mask.push(page.getByText(config.xstore.installationToken, { exact: false }));
   const screenshot = await page.screenshot({ mask });
   await writeFile(file, screenshot, { mode: 0o600, flag: "wx" });
 }
@@ -128,10 +130,16 @@ export async function runScript(options: RunOptions): Promise<{
   const data = new Map<number, Record<string, string>>();
   const items = new Map<number, SaleItem[]>();
   const secretValues: string[] = [];
+  if (options.config.xstore) {
+    const { installationToken, database } = options.config.xstore;
+    secretValues.push(installationToken, encodeURIComponent(installationToken),
+      new URLSearchParams({ token: installationToken }).toString().slice("token=".length));
+    if (database) secretValues.push(database.user, database.password);
+  }
   // Preflight every input before opening a browser or changing POS state.
   for (const step of steps) {
     const action = step.action;
-    if (action.kind === "open") httpUrl(action.target, options.config.baseUrl);
+    if (action.kind === "open") appUrl(action.target, options.config);
     if (action.kind === "scanItems") {
       const file = resolve(dirname(resolve(options.script)), action.file);
       items.set(step.line, saleItems(await readJson(file), `Sale items at line ${step.line}`));
@@ -183,6 +191,10 @@ export async function runScript(options: RunOptions): Promise<{
         console.log(`[planned] step ${result.stepNumber}: ${result.step}`);
       }
     } else {
+      if (options.config.xstore?.database) {
+        await revalidateDeviceAccess(options.config.xstore, options.config.timeoutMs);
+        console.log("[device-access] Configured installation token revalidated.");
+      }
       browser = await chromium.launch({ headless: options.headless ?? false, slowMo: options.slowMo ?? 250 });
       // "fresh" = isolated, empty context per run; a future persistent mode would branch here.
       const context = await browser.newContext({ ignoreHTTPSErrors: options.config.ignoreHttpsErrors });

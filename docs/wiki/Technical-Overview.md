@@ -29,6 +29,7 @@ report of each step's status and duration plus a total.
 | `src/config.ts` | Environment config loading/validation, `defaultSelectors`, URL validation, JSON input helpers |
 | `src/runner.ts` | Preflight, browser lifecycle, step loop, timing, redaction, report writing |
 | `src/xstore.ts` | `executeAction` (Playwright actions per keyword), `exactCashAmount` |
+| `src/device-access.ts` | Optional scoped Oracle device-token revalidation before browser launch |
 | `examples/` | Sample script and example input files |
 | `config/localhost.example.json` | Example environment config |
 | `tests/` | Unit tests and mock-app Chromium integration tests |
@@ -63,7 +64,8 @@ flowchart LR
 4. **Dry run** (`--dry-run`): marks every step `planned`, writes a report, never
    launches a browser or contacts Xstore. A dry-run "passed" means preflight
    succeeded, not that the UI works.
-5. **Live run**: launches Chromium (headed by default, `slowMo` default 250 ms),
+5. **Live run**: optionally revalidates the configured Xstore device token in
+   Oracle, then launches Chromium (headed by default, `slowMo` default 250 ms),
    sets default and navigation timeouts to `timeoutMs`, and executes steps
    sequentially. Console shows `[running]` / `[passed|skipped|failed]` with
    durations live.
@@ -222,11 +224,61 @@ can still expose URLs, paths, UI text, and data outside masked fields; keep them
 | `selectors` | Overrides for named selectors (see below) | `defaultSelectors` |
 | `configurationFields` | Config-file key -> field selector | `storeId`, `registerId` inputs |
 | `amountFormat` | `decimalSeparator`, `groupSeparator`, `currencySymbol` | `.`, `,`, `$` |
+| `xstore` | Optional stable device identity and scoped token revalidation (below) | Disabled; existing shell flow unchanged |
 
 Cash amounts are parsed as strings (no floating point): optional currency symbol
 at either end, three-digit grouping, up to two decimals, e.g. `$1,234.56` ->
 `1234.56`. Ambiguous text (labels, negatives, 3 decimals) is rejected. For
 other locales set `amountFormat`.
+
+### Stable Xstore device identity
+
+See `config/xstore-device.example.json` and the [setup instructions](../../README.md#reuse-and-revalidate-a-device-token).
+With `xstore` configured, `baseUrl` must be a web origin (no path/query/fragment)
+and every `Open app` step must target `"/"` or `"/xstoreshellapp/"`. Both select an
+`/xstoreclient/` URL with `FORM_FACTOR=tablet`, `SERVER_ADDRESS`, `SERVER_PORT`,
+`RETAIL_LOCATION_ID`, `WORKSTATION_ID` and `INSTALLATION_TOKEN`. This bypasses
+shell setup while preserving the existing conditional smoke/sale flows. An
+explicit `--base-url` still overrides the web origin. When `xstore` is enabled
+without a `baseUrl`, the web origin defaults to `https://localhost:8443`.
+
+| `xstore` field | Meaning | Default |
+| --- | --- | --- |
+| `retailLocationId` | Positive integer test store ID; required | None |
+| `organizationId` | Positive integer organization ID | `1` |
+| `workstationId` | Positive integer register ID | `1` |
+| `installationTokenEnv` | Environment variable containing an existing authorized installation token | `XSTORE_INSTALLATION_TOKEN` |
+| `shellAppVersion` | Optional client shell version parameter if required by the deployment | Omitted |
+| `revalidateToken` | Update the matching existing `ENABLED`/`BLOCKED` device record before browser launch | `true` |
+| `database.host` | Oracle hostname or IPv4 address | `localhost` |
+| `database.port` | Oracle listener port, 1-65535 | `1521` |
+| `database.serviceName` | Oracle service name, not a web URL | `shw_xstore_23_0` |
+| `database.userEnv` | Environment variable for the schema user | `XSTORE_DB_USER` |
+| `database.passwordEnv` | Environment variable for the schema password | `XSTORE_DB_PASSWORD` |
+
+Oracle access uses the node-oracledb thin driver (no Instant Client needed).
+The configured user must resolve `CTL_CHEETAH_DEVICE_ACCESS` (for example the
+local `DTV` schema) and have UPDATE permission. The bound UPDATE filters by
+organization, store, workstation, token and eligible status; it changes only
+`STATUS` and `UPDATE_DATE`. Autocommit is disabled and exactly one affected row
+is required before committing. Zero/multiple rows or SQL failures roll back,
+close the connection and fail the run before any browser starts. Connection
+attempts use a five-second timeout; database calls use `timeoutMs`. Tokens,
+passwords and usernames are redacted from reports/errors; driver failures expose
+only safe error codes, not connection strings or SQL values.
+
+For remote revalidation, explicitly provide both `database.host` and
+`database.serviceName`; the runner never assumes the local database belongs
+to a remote web client. With `revalidateToken: false`, omit `database` and
+only the token variable is needed. Dry-run reads/validates settings and secrets
+but never connects to a database. Environment variables must already be set;
+the CLI does not load `.env`.
+
+The same installation token is reused even though `browserState` remains
+`"fresh"`. This avoids generating a new device on each run without persisting
+cashier cookies. It does not isolate server-side state or authorize a new
+device. Use a dedicated test register and do not share its device token with
+concurrent Electron/browser sessions. Never blanket-enable device tokens.
 
 ## 7. Xstore selectors and integration boundaries
 
